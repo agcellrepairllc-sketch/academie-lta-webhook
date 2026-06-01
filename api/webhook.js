@@ -17,18 +17,44 @@ async function getRawBody(req) {
   });
 }
 
-async function lookupProfessionalOrder(email) {
+async function lookupProfessionalOrder(email, name) {
   try {
     const res = await fetch(GOOGLE_SHEET_API);
     const data = await res.json();
-    if (data && data.rows) {
-      const rows = data.rows.filter(r => 
-        r.Email === email && r.Status === 'Payment Intent Started'
-      );
-      if (rows.length > 0) {
-        const latest = rows[rows.length - 1];
-        return latest['Professional Order'] || '';
-      }
+    
+    // Log full response to debug
+    console.log('Sheet API response:', JSON.stringify(data).substring(0, 500));
+    
+    const rows = data.rows || data.data || data || [];
+    console.log('Rows count:', rows.length);
+    
+    if (rows.length > 0) {
+      console.log('First row keys:', Object.keys(rows[0]));
+      console.log('First row:', JSON.stringify(rows[0]));
+    }
+
+    // Try matching by email (case insensitive)
+    let matchedRows = rows.filter(r => {
+      const rowEmail = r.Email || r.email || r.Courriel || r.courriel || '';
+      return rowEmail.toLowerCase() === email.toLowerCase();
+    });
+
+    // Fallback: match by name
+    if (matchedRows.length === 0 && name) {
+      matchedRows = rows.filter(r => {
+        const rowName = r.Name || r.name || r.Nom || r.nom || '';
+        return rowName.toLowerCase() === name.toLowerCase();
+      });
+    }
+
+    console.log('Matched rows:', matchedRows.length);
+
+    if (matchedRows.length > 0) {
+      const latest = matchedRows[matchedRows.length - 1];
+      const order = latest['Professional Order'] || latest['professional_order'] || 
+                    latest['Ordre Professionnel'] || latest['ordre_professionnel'] || '';
+      console.log('Found professional order:', order);
+      return order;
     }
   } catch (err) {
     console.error('Error looking up professional order:', err.message);
@@ -65,11 +91,13 @@ export default async function handler(req, res) {
     const sessionId = session.id;
     const currency = session.currency?.toUpperCase() || 'CAD';
 
+    console.log('Payment confirmed:', { customerEmail, customerName, amountCents, sessionId });
+
     // Look up professional order from Google Sheets
-    const professionalOrder = await lookupProfessionalOrder(customerEmail);
+    const professionalOrder = await lookupProfessionalOrder(customerEmail, customerName);
     const productLabel = professionalOrder ? `Manuel OQLF — ${professionalOrder}` : 'Manuel OQLF';
 
-    console.log('Payment confirmed:', { customerEmail, customerName, professionalOrder, sessionId });
+    console.log('Final professional order:', professionalOrder);
 
     try {
       const response = await fetch(PAYGOGPT_FLOW_WEBHOOK, {
