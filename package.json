@@ -1,0 +1,15 @@
+{
+  "name": "academie-lta-webhook",
+  "version": "1.0.0",
+  "description": "Stripe webhook handler for Académie LTA",
+  "main": "api/webhook.js",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "stripe": "^14.0.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
