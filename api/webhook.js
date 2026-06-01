@@ -1,13 +1,11 @@
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
 const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK;
+const GOOGLE_SHEET_API = 'https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data';
 
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
 };
 
 async function getRawBody(req) {
@@ -19,6 +17,25 @@ async function getRawBody(req) {
   });
 }
 
+async function lookupProfessionalOrder(email) {
+  try {
+    const res = await fetch(GOOGLE_SHEET_API);
+    const data = await res.json();
+    if (data && data.rows) {
+      const rows = data.rows.filter(r => 
+        r.Email === email && r.Status === 'Payment Intent Started'
+      );
+      if (rows.length > 0) {
+        const latest = rows[rows.length - 1];
+        return latest['Professional Order'] || '';
+      }
+    }
+  } catch (err) {
+    console.error('Error looking up professional order:', err.message);
+  }
+  return '';
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -28,7 +45,6 @@ export default async function handler(req, res) {
   const sig = req.headers['stripe-signature'];
 
   let event;
-
   try {
     event = stripe.webhooks.constructEvent(
       rawBody,
@@ -44,12 +60,16 @@ export default async function handler(req, res) {
     const session = event.data.object;
 
     const customerEmail = session.customer_email || session.customer_details?.email || '';
-    const customerName = session.customer_details?.name || session.metadata?.customer_name || '';
-    const productLabel = session.metadata?.product_label || '';
-    const professionalOrder = session.metadata?.professional_order || '';
+    const customerName = session.customer_details?.name || '';
     const amountCents = session.amount_total || 0;
     const sessionId = session.id;
     const currency = session.currency?.toUpperCase() || 'CAD';
+
+    // Look up professional order from Google Sheets
+    const professionalOrder = await lookupProfessionalOrder(customerEmail);
+    const productLabel = professionalOrder ? `Manuel OQLF — ${professionalOrder}` : 'Manuel OQLF';
+
+    console.log('Payment confirmed:', { customerEmail, customerName, professionalOrder, sessionId });
 
     try {
       const response = await fetch(PAYGOGPT_FLOW_WEBHOOK, {
