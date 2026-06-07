@@ -1,13 +1,16 @@
 {
   "name": "academie-lta-webhook",
-  "version": "1.0.0",
-  "description": "Stripe webhook handler for Académie LTA",
+  "version": "2.0.0",
+  "description": "Stripe webhook handler for Académie LTA — PDF delivery with watermarking",
   "main": "api/webhook.js",
   "scripts": {
     "dev": "vercel dev"
   },
   "dependencies": {
-    "stripe": "^14.0.0"
+    "stripe": "^14.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "pdf-lib": "^1.17.1"
   },
   "engines": {
     "node": ">=18.x"
