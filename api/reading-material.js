@@ -10,7 +10,7 @@
 async function getReadingMaterials(order, language, level) {
   try {
     const res = await fetch(
-      `https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data?sheet=Reading+Materials`,
+      `https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data?sheetName=Reading%20Materials`,
       { headers: { 'Accept': 'application/json' } }
     );
     const data = await res.json();
