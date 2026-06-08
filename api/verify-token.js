@@ -61,6 +61,8 @@ async function getTokenFromSheet(token) {
     const res = await fetch(
       `https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data?sheetName=Pronunciation%20Tokens`,
       { headers: { 'Accept': 'application/json' } }
+    );
+    const data = await res.json();
     const data = await res.json();
     const rows = data.rows || data.data || [];
     
