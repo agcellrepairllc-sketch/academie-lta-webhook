@@ -4,60 +4,61 @@
  * 
  * GET /api/reading-material?order=Ingénieur&language=fr-CA&level=1
  * 
- * Returns array of passages from Reading Materials Google Sheet tab
+ * Passages are loaded from READING_MATERIALS below.
+ * Professor adds new passages via the Google Sheet — run sync to update.
  */
 
-async function getReadingMaterials(order, language, level) {
-  try {
-    const res = await fetch(
-      `https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data?sheetName=Reading%20Materials`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-    const data = await res.json();
-    const rows = data.rows || data.data || [];
-
-    // Filter by order (exact or General fallback), language, active status
-    let matches = rows.filter(r => {
-      const rowOrder    = (r.Order    || '').trim();
-      const rowLang     = (r.Language || '').trim();
-      const rowActive   = (r.Active   || '').trim().toLowerCase();
-      const rowLevel    = (r.Level    || '').trim();
-      
-      const orderMatch  = rowOrder.toLowerCase() === order.toLowerCase() ||
-                          rowOrder.toLowerCase() === 'general';
-      const langMatch   = !language || rowLang === language;
-      const activeMatch = rowActive === 'yes' || rowActive === 'true' || rowActive === '1';
-      const levelMatch  = !level || rowLevel === level.toString();
-
-      return orderMatch && langMatch && activeMatch && levelMatch;
-    });
-
-    // Prefer exact order matches over General
-    const exactMatches = matches.filter(r => 
-      r.Order.toLowerCase() === order.toLowerCase()
-    );
-    if (exactMatches.length > 0) matches = exactMatches;
-
-    // Shuffle for variety
-    matches.sort(() => Math.random() - 0.5);
-
-    return matches.map(r => ({
-      order:              r.Order    || '',
-      language:           r.Language || 'fr-CA',
-      level:              r.Level    || '1',
-      topic:              r.Topic    || '',
-      passage:            r.Passage  || '',
-      translation_notes:  r['Translation Notes'] || ''
-    }));
-
-  } catch (err) {
-    console.error('Reading material fetch error:', err.message);
-    return [];
+// ── Reading materials library ─────────────────────────────────────────────────
+// Synced from Google Sheet: Reading Materials tab
+// Last sync: 2026-06-08
+const READING_MATERIALS = [
+  {
+    order: "Ingénieur", language: "fr-CA", level: "1", topic: "Structures",
+    passage: "Les structures en béton armé doivent résister aux charges permanentes et aux surcharges d'exploitation. L'ingénieur doit vérifier la résistance des matériaux selon les normes du Code de construction du Québec. Les calculs structuraux tiennent compte des conditions climatiques locales, notamment les charges de neige et de vent propres au territoire québécois.",
+    translation_notes: "Focus on: béton armé, surcharges, résistance"
+  },
+  {
+    order: "Ingénieur", language: "fr-CA", level: "2", topic: "Thermodynamique",
+    passage: "La thermodynamique est une branche de la physique qui étudie les échanges d'énergie sous forme de chaleur et de travail. En ingénierie mécanique, les cycles thermodynamiques permettent de concevoir des systèmes de chauffage, de climatisation et de production d'énergie. Le rendement d'une machine thermique est toujours inférieur à cent pour cent en raison des pertes irréversibles.",
+    translation_notes: "Focus on: thermodynamique, rendement, irréversibles"
+  },
+  {
+    order: "Médecin", language: "fr-CA", level: "1", topic: "Neurologie",
+    passage: "Le système nerveux central comprend l'encéphale et la moelle épinière. Il coordonne les fonctions vitales de l'organisme et traite les informations sensorielles. Les neurones transmettent les influx nerveux à grande vitesse grâce aux synapses chimiques et électriques. Une lésion médullaire peut entraîner une paralysie partielle ou complète selon le niveau atteint.",
+    translation_notes: "Focus on: encéphale, moelle épinière, synapses"
+  },
+  {
+    order: "Avocat", language: "fr-CA", level: "1", topic: "Droit civil",
+    passage: "Le droit civil québécois est fondé sur le Code civil du Québec entré en vigueur en mil neuf cent quatre-vingt-quatorze. Il régit les relations entre les personnes physiques et morales sur le territoire provincial. Les contrats doivent respecter les conditions essentielles de formation, notamment le consentement libre et éclairé, la capacité des parties et un objet licite.",
+    translation_notes: "Focus on: Code civil, consentement, licite"
+  },
+  {
+    order: "General", language: "fr-CA", level: "1", topic: "Général",
+    passage: "La langue française est la langue officielle du Québec. Elle est utilisée dans toutes les communications professionnelles et administratives. La maîtrise du français standard québécois est essentielle pour exercer une profession réglementée sur le territoire provincial. L'Office québécois de la langue française veille au respect et à la promotion de la langue dans les milieux de travail.",
+    translation_notes: "Focus on: officielle, réglementée, promotion"
   }
+];
+
+function getPassages(order, language, level) {
+  // Filter by language and active
+  let matches = READING_MATERIALS.filter(r => {
+    const orderMatch = r.order.toLowerCase() === order.toLowerCase() ||
+                       r.order.toLowerCase() === 'general';
+    const langMatch  = !language || r.language === language;
+    const levelMatch = !level || r.level === level.toString();
+    return orderMatch && langMatch && levelMatch;
+  });
+
+  // Prefer exact order matches over General
+  const exact = matches.filter(r => r.order.toLowerCase() === order.toLowerCase());
+  if (exact.length > 0) matches = exact;
+
+  // Shuffle for variety
+  matches.sort(() => Math.random() - 0.5);
+  return matches;
 }
 
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -65,40 +66,33 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { 
-    order    = 'General', 
-    language = 'fr-CA', 
+  const {
+    order    = 'General',
+    language = 'fr-CA',
     level    = '',
     random   = 'true'
   } = req.query;
 
-  const passages = await getReadingMaterials(order, language, level);
+  const passages = getPassages(order, language, level);
 
   if (passages.length === 0) {
-    // Final fallback — return a default passage
     return res.status(200).json({
       passages: [{
-        order:    'General',
-        language: 'fr-CA',
-        level:    '1',
-        topic:    'Introduction',
-        passage:  "La langue française est la langue officielle du Québec. Elle est utilisée dans toutes les communications professionnelles et administratives. La maîtrise du français standard québécois est essentielle pour exercer une profession réglementée sur le territoire provincial.",
+        order: 'General', language: 'fr-CA', level: '1', topic: 'Introduction',
+        passage: "La langue française est la langue officielle du Québec. Elle est utilisée dans toutes les communications professionnelles et administratives. La maîtrise du français standard québécois est essentielle pour exercer une profession réglementée sur le territoire provincial.",
         translation_notes: 'Focus on: officielle, réglementée, professionnelles'
       }],
       source: 'fallback'
     });
   }
 
-  // If random=true, return just one random passage
-  // Otherwise return all
-  const result = random === 'true' 
-    ? [passages[0]] 
-    : passages;
+  const result = random === 'true' ? [passages[0]] : passages;
 
   return res.status(200).json({
     passages: result,
     total:    passages.length,
     order,
-    language
+    language,
+    source:   'library'
   });
 }
