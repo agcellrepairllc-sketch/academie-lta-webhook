@@ -280,6 +280,26 @@ export default async function handler(req, res) {
         console.error('PaygoGPT flow trigger failed:', await response.text());
       } else {
         console.log('PaygoGPT Flow 3277 triggered successfully');
+// Generate pronunciation trial token
+try {
+  await fetch('https://academie-lta-webhook.vercel.app/api/create-token', {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.INTERNAL_API_KEY}`
+    },
+    body: JSON.stringify({
+      email:              customerEmail,
+      name:               customerName,
+      professional_order: professionalOrder,
+      token_type:         'trial',
+      stripe_session_id:  sessionId
+    })
+  });
+  console.log('Pronunciation trial token created');
+} catch (err) {
+  console.error('Trial token creation failed:', err.message);
+}
       }
     } catch (err) {
       console.error('Error triggering PaygoGPT flow:', err.message);
