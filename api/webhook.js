@@ -6,20 +6,12 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK;
 const GOOGLE_SHEET_API = 'https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data';
+const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
-// Debug AWS credentials
 const AWS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || '';
 const AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY || '';
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const BUCKET = process.env.S3_BUCKET || 'academielta';
-
-console.log('AWS Config check:', {
-  keyIdLength: AWS_KEY_ID.length,
-  keyIdPrefix: AWS_KEY_ID.substring(0, 4),
-  secretLength: AWS_SECRET.length,
-  region: AWS_REGION,
-  bucket: BUCKET,
-});
 
 const s3 = new S3Client({
   region: AWS_REGION,
@@ -53,8 +45,6 @@ async function lookupProfessionalOrder(email, name) {
     const res = await fetch(GOOGLE_SHEET_API);
     const data = await res.json();
     const rows = data.rows || data.data || [];
-
-    console.log(`Total rows in sheet: ${rows.length}`);
 
     let matchedRows = rows.filter(r => {
       const rowEmail = r.Email || r.email || r.Courriel || '';
@@ -92,7 +82,6 @@ async function downloadPDF(order) {
 
   const key = `manuals/${filename}.pdf`;
   console.log(`Looking for PDF at S3 key: ${key}`);
-  console.log(`Using bucket: ${BUCKET}, region: ${AWS_REGION}`);
 
   try {
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
@@ -105,12 +94,11 @@ async function downloadPDF(order) {
     return Buffer.concat(chunks);
   } catch (err) {
     console.error(`PDF not found at ${key}:`, err.message);
-    console.error('Full error:', err.name, err.Code);
     return null;
   }
 }
 
-async function watermarkPDF(pdfBuffer, customerName, order, date) {
+async function watermarkPDF(pdfBuffer, customerName, date) {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
@@ -130,12 +118,68 @@ async function watermarkPDF(pdfBuffer, customerName, order, date) {
         rotate: { type: 'degrees', angle: 35 },
       });
     }
-    page.drawText(`Matériel d'étude personnel pour : ${customerName} — Académie LTA — ${date}`, {
+    page.drawText(`Matériel d'étude personnel pour : ${customerName} — Académie LTA — ${date} — © Usage personnel uniquement`, {
       x: 30, y: 20, size: 7, font,
       color: rgb(0.5, 0.5, 0.5), opacity: 0.6,
     });
   }
   return await pdfDoc.save();
+}
+
+async function encryptPDFWithPdfCo(pdfBuffer, password, sessionId) {
+  console.log('Uploading PDF to PDF.co for encryption...');
+
+  // Step 1: Get presigned upload URL from PDF.co
+  const uploadRes = await fetch('https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/pdf&name=manual.pdf', {
+    headers: { 'x-api-key': PDF_CO_API_KEY },
+  });
+  const uploadData = await uploadRes.json();
+
+  if (!uploadData.presignedUrl) {
+    throw new Error('Failed to get PDF.co upload URL: ' + JSON.stringify(uploadData));
+  }
+
+  // Step 2: Upload PDF to PDF.co
+  await fetch(uploadData.presignedUrl, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/pdf' },
+    body: pdfBuffer,
+  });
+
+  console.log('PDF uploaded to PDF.co, encrypting...');
+
+  // Step 3: Encrypt the PDF
+  const encryptRes = await fetch('https://api.pdf.co/v1/pdf/security/add', {
+    method: 'POST',
+    headers: {
+      'x-api-key': PDF_CO_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      url: uploadData.url,
+      userPassword: password,
+      ownerPassword: password + '-OWNER',
+      allowPrinting: false,
+      allowCopyContent: false,
+      allowModifyDocument: false,
+      async: false,
+      name: `${sessionId}-encrypted.pdf`,
+    }),
+  });
+
+  const encryptData = await encryptRes.json();
+
+  if (encryptData.error || !encryptData.url) {
+    throw new Error('PDF.co encryption failed: ' + JSON.stringify(encryptData));
+  }
+
+  console.log('PDF encrypted successfully by PDF.co');
+
+  // Step 4: Download encrypted PDF
+  const downloadRes = await fetch(encryptData.url);
+  const encryptedBuffer = Buffer.from(await downloadRes.arrayBuffer());
+
+  return encryptedBuffer;
 }
 
 async function uploadAndGetSignedUrl(pdfBuffer, sessionId, order) {
@@ -195,10 +239,21 @@ export default async function handler(req, res) {
       const pdfBuffer = await downloadPDF(professionalOrder);
       if (pdfBuffer) {
         console.log('Watermarking PDF...');
-        const watermarked = await watermarkPDF(pdfBuffer, customerName, professionalOrder, date);
-        downloadUrl = await uploadAndGetSignedUrl(watermarked, sessionId, professionalOrder);
-        pdfAvailable = true;
-        console.log('PDF delivery complete!');
+        const watermarked = await watermarkPDF(pdfBuffer, customerName, date);
+
+        console.log('Encrypting PDF with password...');
+        try {
+          const encrypted = await encryptPDFWithPdfCo(watermarked, pdfPassword, sessionId);
+          downloadUrl = await uploadAndGetSignedUrl(encrypted, sessionId, professionalOrder);
+          pdfAvailable = true;
+          console.log('PDF delivery complete with encryption!');
+        } catch (encErr) {
+          console.error('Encryption failed, uploading without encryption:', encErr.message);
+          // Fallback: upload without encryption
+          downloadUrl = await uploadAndGetSignedUrl(watermarked, sessionId, professionalOrder);
+          pdfAvailable = true;
+          console.log('PDF delivery complete (no encryption)');
+        }
       }
     }
 
