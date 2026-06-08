@@ -45,24 +45,36 @@ async function lookupProfessionalOrder(email, name) {
     const data = await res.json();
     const rows = data.rows || data.data || [];
 
-    // Match by email first
+    console.log(`Total rows in sheet: ${rows.length}`);
+
+    // Match by email first — prefer rows with non-empty Professional Order
     let matchedRows = rows.filter(r => {
       const rowEmail = r.Email || r.email || r.Courriel || '';
-      return rowEmail.toLowerCase() === email.toLowerCase();
+      const rowOrder = r['Professional Order'] || r['Ordre Professionnel'] || '';
+      return rowEmail.toLowerCase() === email.toLowerCase() && rowOrder.trim() !== '';
     });
 
-    // Fallback: match by name
+    console.log(`Matched rows with email + order: ${matchedRows.length}`);
+
+    // Fallback: match by name with non-empty order
     if (matchedRows.length === 0 && name) {
       matchedRows = rows.filter(r => {
         const rowName = r.Name || r.name || r.Nom || '';
-        return rowName.toLowerCase() === name.toLowerCase();
+        const rowOrder = r['Professional Order'] || r['Ordre Professionnel'] || '';
+        return rowName.toLowerCase() === name.toLowerCase() && rowOrder.trim() !== '';
       });
+      console.log(`Matched rows with name + order: ${matchedRows.length}`);
     }
 
     if (matchedRows.length > 0) {
+      // Get the most recent row with a professional order
       const latest = matchedRows[matchedRows.length - 1];
-      return latest['Professional Order'] || latest['Ordre Professionnel'] || '';
+      const order = latest['Professional Order'] || latest['Ordre Professionnel'] || '';
+      console.log(`Found professional order: "${order}"`);
+      return order;
     }
+
+    console.log('No matching rows found with professional order');
   } catch (err) {
     console.error('Error looking up professional order:', err.message);
   }
@@ -71,16 +83,15 @@ async function lookupProfessionalOrder(email, name) {
 
 // Download PDF from S3
 async function downloadPDF(order) {
-  // Normalize filename — replace special characters
   const filename = order
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9\s-]/g, '')
     .trim()
     .replace(/\s+/g, '_');
 
   const key = `manuals/${filename}.pdf`;
-  console.log(`Looking for PDF: ${key}`);
+  console.log(`Looking for PDF at S3 key: ${key}`);
 
   try {
     const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
@@ -89,9 +100,10 @@ async function downloadPDF(order) {
     for await (const chunk of response.Body) {
       chunks.push(chunk);
     }
+    console.log(`PDF downloaded successfully: ${key}`);
     return Buffer.concat(chunks);
   } catch (err) {
-    console.error(`PDF not found: ${key}`, err.message);
+    console.error(`PDF not found at ${key}:`, err.message);
     return null;
   }
 }
@@ -107,7 +119,6 @@ async function watermarkPDF(pdfBuffer, customerName, order, date) {
   for (const page of pages) {
     const { width, height } = page.getSize();
 
-    // Diagonal watermark — repeated across page
     const positions = [
       { x: width * 0.1, y: height * 0.25 },
       { x: width * 0.1, y: height * 0.5 },
@@ -126,7 +137,6 @@ async function watermarkPDF(pdfBuffer, customerName, order, date) {
       });
     }
 
-    // Footer on every page
     page.drawText(`Matériel d'étude personnel pour : ${customerName} — Académie LTA — ${date}`, {
       x: 30,
       y: 20,
@@ -151,7 +161,6 @@ async function uploadAndGetSignedUrl(pdfBuffer, sessionId, order) {
 
   const key = `watermarked/${sessionId}-${filename}.pdf`;
 
-  // Upload to S3
   await s3.send(new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
@@ -159,7 +168,6 @@ async function uploadAndGetSignedUrl(pdfBuffer, sessionId, order) {
     ContentType: 'application/pdf',
   }));
 
-  // Generate pre-signed URL (48 hours)
   const command = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   const url = await getSignedUrl(s3, command, { expiresIn: 172800 });
 
@@ -200,10 +208,11 @@ export default async function handler(req, res) {
     const professionalOrder = await lookupProfessionalOrder(customerEmail, customerName);
     const productLabel = professionalOrder ? `Manuel OQLF — ${professionalOrder}` : 'Manuel OQLF';
 
-    console.log('Professional order:', professionalOrder);
+    console.log('Final professional order:', professionalOrder);
 
     // Generate unique password
     const pdfPassword = generatePassword();
+    console.log('PDF password generated:', pdfPassword);
 
     // PDF delivery
     let downloadUrl = null;
@@ -213,14 +222,16 @@ export default async function handler(req, res) {
       const pdfBuffer = await downloadPDF(professionalOrder);
 
       if (pdfBuffer) {
-        console.log('PDF found, watermarking...');
+        console.log('Watermarking PDF...');
         const watermarked = await watermarkPDF(pdfBuffer, customerName, professionalOrder, date);
         downloadUrl = await uploadAndGetSignedUrl(watermarked, sessionId, professionalOrder);
         pdfAvailable = true;
-        console.log('PDF watermarked and uploaded successfully');
+        console.log('PDF delivery complete!');
       } else {
-        console.log('PDF not found for order:', professionalOrder);
+        console.log('PDF not available for this order — sending fallback email');
       }
+    } else {
+      console.log('No professional order found — skipping PDF delivery');
     }
 
     // Trigger PaygoGPT Flow 3277
