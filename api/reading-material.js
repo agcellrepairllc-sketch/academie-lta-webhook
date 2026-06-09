@@ -1,98 +1,83 @@
-/**
- * api/reading-material.js
- * Vercel serverless function — fetches reading passages for a student
- * 
- * GET /api/reading-material?order=Ingénieur&language=fr-CA&level=1
- * 
- * Passages are loaded from READING_MATERIALS below.
- * Professor adds new passages via the Google Sheet — run sync to update.
- */
-
-// ── Reading materials library ─────────────────────────────────────────────────
-// Synced from Google Sheet: Reading Materials tab
-// Last sync: 2026-06-08
-const READING_MATERIALS = [
-  {
-    order: "Ingénieur", language: "fr-CA", level: "1", topic: "Structures",
-    passage: "Les structures en béton armé doivent résister aux charges permanentes et aux surcharges d'exploitation. L'ingénieur doit vérifier la résistance des matériaux selon les normes du Code de construction du Québec. Les calculs structuraux tiennent compte des conditions climatiques locales, notamment les charges de neige et de vent propres au territoire québécois.",
-    translation_notes: "Focus on: béton armé, surcharges, résistance"
+const READING_MATERIALS = {
+  'fr-CA': {
+    'Ingénieur': [
+      {
+        topic: 'Structures', level: 'B2',
+        passage: "Les structures en béton armé doivent résister aux charges permanentes et aux surcharges d'exploitation. L'ingénieur doit vérifier la résistance des matériaux selon les normes du Code de construction du Québec. Les calculs structuraux tiennent compte des conditions climatiques locales, notamment les charges de neige et de vent propres au territoire québécois."
+      },
+      {
+        topic: 'Environnement', level: 'B2',
+        passage: "L'évaluation environnementale d'un projet de construction nécessite une analyse approfondie des impacts sur les écosystèmes locaux. L'ingénieur doit proposer des mesures d'atténuation efficaces pour minimiser les perturbations du milieu naturel. Le rapport d'impact doit être soumis au ministère compétent avant le début des travaux."
+      }
+    ],
+    'Médecin': [
+      {
+        topic: 'Diagnostic', level: 'C1',
+        passage: "Le diagnostic différentiel est une étape cruciale dans la pratique médicale. Le médecin doit analyser l'ensemble des symptômes du patient, les résultats des examens complémentaires et l'historique médical pour établir un diagnostic précis. La communication claire avec le patient sur les options thérapeutiques disponibles est fondamentale pour obtenir un consentement éclairé."
+      }
+    ],
+    'Avocat': [
+      {
+        topic: 'Droit civil', level: 'C1',
+        passage: "Le Code civil du Québec constitue le fondement du droit privé québécois et régit les rapports entre les personnes. L'avocat doit maîtriser les dispositions relatives aux contrats, à la responsabilité civile et au droit de la famille pour conseiller efficacement ses clients. L'interprétation des textes législatifs requiert une analyse rigoureuse de la jurisprudence pertinente."
+      }
+    ],
+    'General': [
+      {
+        topic: 'Communication', level: 'B2',
+        passage: "La communication professionnelle en milieu de travail québécois exige clarté, précision et respect des conventions culturelles locales. Lors de réunions ou de présentations, il est important d'adapter son registre de langue selon le contexte et l'auditoire. La capacité d'exprimer des idées complexes de façon concise est une compétence très valorisée dans le monde professionnel."
+      }
+    ]
   },
-  {
-    order: "Ingénieur", language: "fr-CA", level: "2", topic: "Thermodynamique",
-    passage: "La thermodynamique est une branche de la physique qui étudie les échanges d'énergie sous forme de chaleur et de travail. En ingénierie mécanique, les cycles thermodynamiques permettent de concevoir des systèmes de chauffage, de climatisation et de production d'énergie. Le rendement d'une machine thermique est toujours inférieur à cent pour cent en raison des pertes irréversibles.",
-    translation_notes: "Focus on: thermodynamique, rendement, irréversibles"
-  },
-  {
-    order: "Médecin", language: "fr-CA", level: "1", topic: "Neurologie",
-    passage: "Le système nerveux central comprend l'encéphale et la moelle épinière. Il coordonne les fonctions vitales de l'organisme et traite les informations sensorielles. Les neurones transmettent les influx nerveux à grande vitesse grâce aux synapses chimiques et électriques. Une lésion médullaire peut entraîner une paralysie partielle ou complète selon le niveau atteint.",
-    translation_notes: "Focus on: encéphale, moelle épinière, synapses"
-  },
-  {
-    order: "Avocat", language: "fr-CA", level: "1", topic: "Droit civil",
-    passage: "Le droit civil québécois est fondé sur le Code civil du Québec entré en vigueur en mil neuf cent quatre-vingt-quatorze. Il régit les relations entre les personnes physiques et morales sur le territoire provincial. Les contrats doivent respecter les conditions essentielles de formation, notamment le consentement libre et éclairé, la capacité des parties et un objet licite.",
-    translation_notes: "Focus on: Code civil, consentement, licite"
-  },
-  {
-    order: "General", language: "fr-CA", level: "1", topic: "Général",
-    passage: "La langue française est la langue officielle du Québec. Elle est utilisée dans toutes les communications professionnelles et administratives. La maîtrise du français standard québécois est essentielle pour exercer une profession réglementée sur le territoire provincial. L'Office québécois de la langue française veille au respect et à la promotion de la langue dans les milieux de travail.",
-    translation_notes: "Focus on: officielle, réglementée, promotion"
+  'en-CA': {
+    'Ingénieur': [
+      {
+        topic: 'Structures', level: 'B2',
+        passage: "Reinforced concrete structures must withstand permanent loads and live loads according to established engineering standards. The engineer must verify material resistance in compliance with the Quebec Construction Code. Structural calculations take into account local climatic conditions, particularly snow and wind loads specific to the Quebec territory."
+      },
+      {
+        topic: 'Project Management', level: 'C1',
+        passage: "Effective management of a construction site relies on rigorous planning of human and material resources. The project engineer must coordinate different trades while respecting established deadlines and budget. Regular communication with the client and stakeholders is essential to ensure the smooth progress of the work."
+      }
+    ],
+    'Médecin': [
+      {
+        topic: 'Diagnosis', level: 'C1',
+        passage: "Differential diagnosis is a crucial step in medical practice. The physician must analyze all patient symptoms, results of complementary examinations, and medical history to establish an accurate diagnosis. Clear communication with the patient about available therapeutic options is fundamental to obtaining informed consent."
+      }
+    ],
+    'Avocat': [
+      {
+        topic: 'Civil Law', level: 'C1',
+        passage: "The Civil Code of Quebec forms the foundation of Quebec private law and governs relations between persons. The lawyer must master provisions relating to contracts, civil liability, and family law to effectively advise clients. Interpretation of legislative texts requires rigorous analysis of relevant case law and jurisprudence."
+      }
+    ],
+    'General': [
+      {
+        topic: 'Communication', level: 'B2',
+        passage: "Effective workplace communication in a Canadian professional environment requires adapting your language register to the context and audience. During meetings or presentations, it is important to structure your ideas clearly and deliver them with appropriate pace and intonation. Active listening and asking clarifying questions demonstrate engagement and professionalism in any setting."
+      }
+    ]
   }
-];
+};
 
-function getPassages(order, language, level) {
-  // Filter by language and active
-  let matches = READING_MATERIALS.filter(r => {
-    const orderMatch = r.order.toLowerCase() === order.toLowerCase() ||
-                       r.order.toLowerCase() === 'general';
-    const langMatch  = !language || r.language === language;
-    const levelMatch = !level || r.level === level.toString();
-    return orderMatch && langMatch && levelMatch;
-  });
-
-  // Prefer exact order matches over General
-  const exact = matches.filter(r => r.order.toLowerCase() === order.toLowerCase());
-  if (exact.length > 0) matches = exact;
-
-  // Shuffle for variety
-  matches.sort(() => Math.random() - 0.5);
-  return matches;
-}
-
-export default async function handler(req, res) {
+export default function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const {
-    order    = 'General',
-    language = 'fr-CA',
-    level    = '',
-    random   = 'true'
-  } = req.query;
-
-  const passages = getPassages(order, language, level);
-
-  if (passages.length === 0) {
-    return res.status(200).json({
-      passages: [{
-        order: 'General', language: 'fr-CA', level: '1', topic: 'Introduction',
-        passage: "La langue française est la langue officielle du Québec. Elle est utilisée dans toutes les communications professionnelles et administratives. La maîtrise du français standard québécois est essentielle pour exercer une profession réglementée sur le territoire provincial.",
-        translation_notes: 'Focus on: officielle, réglementée, professionnelles'
-      }],
-      source: 'fallback'
-    });
-  }
-
-  const result = random === 'true' ? [passages[0]] : passages;
+  const { order = 'General', language = 'fr-CA' } = req.query;
+  const langMaterials = READING_MATERIALS[language] || READING_MATERIALS['fr-CA'];
+  const orderKey = Object.keys(langMaterials).find(
+    k => k.toLowerCase() === order.toLowerCase()
+  ) || 'General';
+  const passages = langMaterials[orderKey] || langMaterials['General'];
+  const randomPassage = passages[Math.floor(Math.random() * passages.length)];
 
   return res.status(200).json({
-    passages: result,
-    total:    passages.length,
-    order,
-    language,
-    source:   'library'
+    order: orderKey, language,
+    passages: [randomPassage],
+    ...randomPassage
   });
 }
