@@ -40,7 +40,6 @@ async function getRawBody(req) {
   });
 }
 
-// Check if session already processed in Google Sheets
 async function isAlreadyProcessed(sessionId) {
   try {
     const res = await fetch(GOOGLE_SHEET_API);
@@ -58,21 +57,18 @@ async function isAlreadyProcessed(sessionId) {
   }
 }
 
-// Look up form name AND professional order from Google Sheets
 async function lookupFromSheet(email, stripeName) {
   try {
     const res = await fetch(GOOGLE_SHEET_API);
     const data = await res.json();
     const rows = data.rows || data.data || [];
 
-    // Match by email, prefer rows with non-empty Professional Order
     let matchedRows = rows.filter(r => {
       const rowEmail = r.Email || r.email || r.Courriel || '';
       const rowOrder = r['Professional Order'] || r['Ordre Professionnel'] || '';
       return rowEmail.toLowerCase() === email.toLowerCase() && rowOrder.trim() !== '';
     });
 
-    // Fallback: match by Stripe name
     if (matchedRows.length === 0 && stripeName) {
       matchedRows = rows.filter(r => {
         const rowName = r.Name || r.name || r.Nom || '';
@@ -123,33 +119,32 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
 
-  // Show both names on watermark for legal protection
   const watermarkText = stripeName && stripeName !== formName
     ? `Matériel d'étude personnel pour : ${formName} (${stripeName})`
     : `Matériel d'étude personnel pour : ${formName}`;
 
+  const footerText = stripeName && stripeName !== formName
+    ? `© Académie LTA — ${formName} (${stripeName}) — ${date} — Usage personnel uniquement`
+    : `© Académie LTA — ${formName} — ${date} — Usage personnel uniquement`;
+
   for (const page of pages) {
     const { width, height } = page.getSize();
-    const positions = [
-      { x: width * 0.1, y: height * 0.25 },
-      { x: width * 0.1, y: height * 0.5 },
-      { x: width * 0.1, y: height * 0.75 },
-    ];
-    for (const pos of positions) {
-      page.drawText(watermarkText, {
-        x: pos.x, y: pos.y, size: 10, font,
-        color: rgb(0.7, 0.7, 0.7), opacity: 0.20,
-        rotate: { type: 'degrees', angle: 35 },
-      });
-    }
-    // Footer with both names
-    const footerText = stripeName && stripeName !== formName
-      ? `© Académie LTA — ${formName} (${stripeName}) — ${date} — Usage personnel uniquement`
-      : `© Académie LTA — ${formName} — ${date} — Usage personnel uniquement`;
 
+    // Single diagonal watermark in the center only
+    page.drawText(watermarkText, {
+      x: width * 0.08,
+      y: height * 0.45,
+      size: 11,
+      font,
+      color: rgb(0.7, 0.7, 0.7),
+      opacity: 0.20,
+      rotate: { type: 'degrees', angle: 35 },
+    });
+
+    // Footer on every page
     page.drawText(footerText, {
-      x: 30, y: 20, size: 7, font,
-      color: rgb(0.5, 0.5, 0.5), opacity: 0.5,
+      x: 30, y: 15, size: 7, font,
+      color: rgb(0.5, 0.5, 0.5), opacity: 0.6,
     });
   }
   return await pdfDoc.save();
@@ -157,17 +152,20 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
 
 async function encryptPDFWithPdfCo(pdfBuffer, password, filename) {
   console.log('Uploading to PDF.co for encryption...');
+
   const uploadRes = await fetch('https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/pdf&name=manual.pdf', {
     headers: { 'x-api-key': PDF_CO_API_KEY },
   });
   const uploadData = await uploadRes.json();
+  console.log('PDF.co upload response:', JSON.stringify(uploadData).substring(0, 200));
   if (!uploadData.presignedUrl) throw new Error('PDF.co upload URL failed: ' + JSON.stringify(uploadData));
 
-  await fetch(uploadData.presignedUrl, {
+  const putRes = await fetch(uploadData.presignedUrl, {
     method: 'PUT',
     headers: { 'content-type': 'application/pdf' },
     body: pdfBuffer,
   });
+  console.log('PDF.co PUT status:', putRes.status);
 
   const encryptRes = await fetch('https://api.pdf.co/v1/pdf/security/add', {
     method: 'POST',
@@ -185,9 +183,11 @@ async function encryptPDFWithPdfCo(pdfBuffer, password, filename) {
   });
 
   const encryptData = await encryptRes.json();
+  console.log('PDF.co encrypt response:', JSON.stringify(encryptData).substring(0, 300));
+
   if (encryptData.error || !encryptData.url) throw new Error('PDF.co encryption failed: ' + JSON.stringify(encryptData));
 
-  console.log('PDF encrypted by PDF.co');
+  console.log('PDF encrypted successfully by PDF.co');
   const downloadRes = await fetch(encryptData.url);
   return Buffer.from(await downloadRes.arrayBuffer());
 }
@@ -231,14 +231,13 @@ export default async function handler(req, res) {
 
     console.log('Payment confirmed:', { customerEmail, stripeName, sessionId });
 
-    // DEDUPLICATION — check if already processed
+    // DEDUPLICATION
     const alreadyDone = await isAlreadyProcessed(sessionId);
     if (alreadyDone) {
       console.log('Duplicate webhook — skipping');
       return res.status(200).json({ received: true, skipped: true });
     }
 
-    // Look up form name + professional order from Google Sheets
     const { formName, order: professionalOrder } = await lookupFromSheet(customerEmail, stripeName);
     const productLabel = professionalOrder ? `Manuel OQLF — ${professionalOrder}` : 'Manuel OQLF';
     const pdfPassword = generatePassword();
@@ -251,17 +250,17 @@ export default async function handler(req, res) {
     if (professionalOrder) {
       const pdfResult = await downloadPDF(professionalOrder);
       if (pdfResult) {
-        console.log('Watermarking PDF with both names...');
+        console.log('Watermarking PDF...');
         const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
         try {
           const encrypted = await encryptPDFWithPdfCo(watermarked, pdfPassword, pdfResult.filename);
           downloadUrl = await uploadAndGetSignedUrl(encrypted, pdfResult.filename);
           pdfAvailable = true;
-          console.log('PDF delivery complete!');
+          console.log('PDF delivery complete with encryption!');
         } catch (encErr) {
-          console.error('Encryption failed, using watermark only:', encErr.message);
-          downloadUrl = await uploadAndGetSignedUrl(watermarked, pdfResult.filename);
-          pdfAvailable = true;
+          console.error('Encryption failed:', encErr.message);
+          // Do NOT fall back — if encryption fails, don't deliver unencrypted
+          console.log('PDF not delivered due to encryption failure');
         }
       }
     }
