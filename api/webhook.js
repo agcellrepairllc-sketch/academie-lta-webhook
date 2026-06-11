@@ -2,11 +2,11 @@ import Stripe from 'stripe';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import { createHash, randomBytes } from 'crypto';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK;
 const GOOGLE_SHEET_API = 'https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data';
+const RENDER_ENCRYPT_URL = 'https://pronunciation-api-l0pg.onrender.com/encrypt-pdf';
 
 const AWS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || '';
 const AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY || '';
@@ -15,112 +15,15 @@ const BUCKET = process.env.S3_BUCKET || 'academielta';
 
 const s3 = new S3Client({
   region: AWS_REGION,
-  credentials: {
-    accessKeyId: AWS_KEY_ID,
-    secretAccessKey: AWS_SECRET,
-  },
+  credentials: { accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET },
 });
 
-export const config = {
-  api: { bodyParser: false },
-};
-
-// PDF encryption constants
-const PADDING = Buffer.from([
-  0x28,0xBF,0x4E,0x5E,0x4E,0x75,0x8A,0x41,
-  0x64,0x00,0x4E,0x56,0xFF,0xFA,0x01,0x08,
-  0x2E,0x2E,0x00,0xB6,0xD0,0x68,0x3E,0x80,
-  0x2F,0x0C,0xA9,0xFE,0x64,0x53,0x69,0x7A
-]);
-
-function rc4(key, data) {
-  const S = Array.from({length:256},(_,i)=>i);
-  let j=0;
-  for(let i=0;i<256;i++){j=(j+S[i]+key[i%key.length])&0xff;[S[i],S[j]]=[S[j],S[i]];}
-  let i=0;j=0;
-  const r=Buffer.alloc(data.length);
-  for(let k=0;k<data.length;k++){i=(i+1)&0xff;j=(j+S[i])&0xff;[S[i],S[j]]=[S[j],S[i]];r[k]=data[k]^S[(S[i]+S[j])&0xff];}
-  return r;
-}
-
-function padPwd(pwd){
-  const b=Buffer.from(pwd||'','latin1');
-  return Buffer.concat([b,PADDING]).slice(0,32);
-}
-
-function encryptPDFBuffer(pdfBuffer, userPwd, ownerPwd) {
-  const KL = 16; // 128-bit key
-  const fileId = randomBytes(16);
-  const fileIdHex = fileId.toString('hex').toUpperCase();
-  const permissions = -3904; // restrict copy + print
-
-  // Compute owner key
-  let oHash = createHash('md5').update(padPwd(ownerPwd)).digest();
-  for(let i=0;i<50;i++) oHash=createHash('md5').update(oHash.slice(0,KL)).digest();
-  const oKey = oHash.slice(0,KL);
-  let oVal = padPwd(userPwd);
-  for(let i=0;i<20;i++){const k=Buffer.from(oKey.map((b,x)=>b^i));oVal=rc4(k,oVal);}
-
-  // Compute encryption key
-  const permBuf=Buffer.alloc(4); permBuf.writeInt32LE(permissions);
-  let eKey=createHash('md5').update(padPwd(userPwd)).update(oVal).update(permBuf).update(fileId).digest().slice(0,KL);
-  for(let i=0;i<50;i++) eKey=createHash('md5').update(eKey).digest().slice(0,KL);
-
-  // Compute user value
-  let uVal=PADDING;
-  for(let i=0;i<20;i++){const k=Buffer.from(eKey.map((b,x)=>b^i));uVal=rc4(k,uVal);}
-  uVal=Buffer.concat([uVal,Buffer.alloc(16)]).slice(0,32);
-
-  const oValHex=oVal.toString('hex').toUpperCase();
-  const uValHex=uVal.toString('hex').toUpperCase();
-
-  // Parse PDF and encrypt streams
-  let pdfStr = pdfBuffer.toString('binary');
-
-  // Collect object numbers and positions
-  const objMap = {};
-  const objReg = /(\d+) (\d+) obj/g;
-  let m;
-  while((m=objReg.exec(pdfStr))!==null) objMap[m.index]=parseInt(m[1]);
-
-  // Encrypt streams
-  pdfStr = pdfStr.replace(/(\d+ \d+ obj[\s\S]*?stream\r?\n)([\s\S]*?)(\r?\nendstream)/g, (match, hdr, content, ftr, offset) => {
-    let objNum = 1;
-    for(const pos of Object.keys(objMap).map(Number).sort((a,b)=>a-b)){
-      if(pos<=offset) objNum=objMap[pos];
-    }
-    const objKeyBuf = Buffer.alloc(KL+5);
-    eKey.copy(objKeyBuf);
-    objKeyBuf.writeUIntLE(objNum,KL,3);
-    objKeyBuf.writeUIntLE(0,KL+3,2);
-    const objKey = createHash('md5').update(objKeyBuf).digest().slice(0,Math.min(KL+5,16));
-    const enc = rc4(objKey, Buffer.from(content,'binary'));
-    return hdr + enc.toString('binary') + ftr;
-  });
-
-  // Find highest object number
-  const allObjs = [...pdfStr.matchAll(/^(\d+) \d+ obj/gm)];
-  const maxObj = allObjs.reduce((max,m)=>Math.max(max,parseInt(m[1])),0);
-  const encObjNum = maxObj + 1;
-
-  const encDict = `${encObjNum} 0 obj\n<<\n/Filter /Standard\n/V 2\n/R 3\n/Length ${KL*8}\n/P ${permissions}\n/O <${oValHex}>\n/U <${uValHex}>\n>>\nendobj\n`;
-
-  // Update trailer
-  pdfStr = pdfStr.replace(/trailer[\s\n]*<</, `trailer\n<<\n/Encrypt ${encObjNum} 0 R\n/ID [<${fileIdHex}><${fileIdHex}>]`);
-
-  // Remove existing /ID if duplicate
-  pdfStr = pdfStr.replace(/\/ID \[<[^>]+><[^>]+>\]\s*\/ID \[<[^>]+><[^>]+>\]/g, `/ID [<${fileIdHex}><${fileIdHex}>]`);
-
-  // Append encrypt object before %%EOF
-  pdfStr = pdfStr.replace(/(%%EOF[\s]*)$/, encDict + '%%EOF\n');
-
-  return Buffer.from(pdfStr, 'binary');
-}
+export const config = { api: { bodyParser: false } };
 
 function generatePassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const segment = () => Array.from({length:4},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
-  return `${segment()}-${segment()}-${segment()}`;
+  const seg = () => Array.from({length:4},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+  return `${seg()}-${seg()}-${seg()}`;
 }
 
 async function getRawBody(req) {
@@ -138,9 +41,9 @@ async function isAlreadyProcessed(sessionId) {
     const data = await res.json();
     const rows = data.rows || data.data || [];
     const found = rows.some(r=>(r['Payment ID']||'')===sessionId);
-    if(found) console.log(`Session ${sessionId} already processed`);
+    if(found) console.log(`Already processed: ${sessionId}`);
     return found;
-  } catch(err) { console.error('Duplicate check error:',err.message); return false; }
+  } catch(err){console.error('Duplicate check error:',err.message);return false;}
 }
 
 async function lookupFromSheet(email, stripeName) {
@@ -176,8 +79,7 @@ async function downloadPDF(order) {
   const key = `manuals/${filename}.pdf`;
   console.log(`Looking for PDF: ${key}`);
   try {
-    const cmd = new GetObjectCommand({Bucket:BUCKET,Key:key});
-    const resp = await s3.send(cmd);
+    const resp = await s3.send(new GetObjectCommand({Bucket:BUCKET,Key:key}));
     const chunks=[];
     for await(const c of resp.Body) chunks.push(c);
     console.log(`PDF downloaded: ${key}`);
@@ -201,6 +103,23 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
     page.drawText(ftText,{x:30,y:15,size:7,font,color:rgb(0.5,0.5,0.5),opacity:0.6});
   }
   return await pdfDoc.save();
+}
+
+async function encryptViaRender(pdfBuffer, password) {
+  console.log('Sending to Render for encryption...');
+  const pdfBase64 = pdfBuffer.toString('base64');
+  const resp = await fetch(RENDER_ENCRYPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pdf_base64: pdfBase64, password }),
+  });
+  if(!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Render encrypt failed: ${resp.status} ${errText}`);
+  }
+  const encrypted = Buffer.from(await resp.arrayBuffer());
+  console.log('PDF encrypted via Render successfully!');
+  return encrypted;
 }
 
 async function uploadAndGetSignedUrl(pdfBuffer, filename) {
@@ -236,7 +155,6 @@ export default async function handler(req, res) {
     console.log('Payment confirmed:',{customerEmail,stripeName,sessionId});
 
     if(await isAlreadyProcessed(sessionId)){
-      console.log('Duplicate — skipping');
       return res.status(200).json({received:true,skipped:true});
     }
 
@@ -254,15 +172,15 @@ export default async function handler(req, res) {
         console.log('Watermarking...');
         const watermarked = await watermarkPDF(pdfResult.buffer,formName,stripeName,date);
         try {
-          console.log('Encrypting with pure JS...');
-          const encrypted = encryptPDFBuffer(watermarked,pdfPassword,pdfPassword+'-OWNER');
+          const encrypted = await encryptViaRender(watermarked, pdfPassword);
           downloadUrl = await uploadAndGetSignedUrl(encrypted,pdfResult.filename);
           pdfAvailable = true;
           console.log('PDF delivery complete with encryption!');
         } catch(encErr){
-          console.error('Encryption failed, watermark only:',encErr.message);
+          console.error('Render encryption failed, watermark only:',encErr.message);
           downloadUrl = await uploadAndGetSignedUrl(watermarked,pdfResult.filename);
           pdfAvailable = true;
+          console.log('PDF delivery complete (watermark only)');
         }
       }
     }
