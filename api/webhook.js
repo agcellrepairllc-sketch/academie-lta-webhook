@@ -2,11 +2,14 @@ import Stripe from 'stripe';
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { execSync } from 'child_process';
+import { writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK;
 const GOOGLE_SHEET_API = 'https://app.paygogpt.com/api/public/landing-pages/4156/sheet-data';
-const PDF_CO_API_KEY = process.env.PDF_CO_API_KEY;
 
 const AWS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || '';
 const AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY || '';
@@ -130,18 +133,17 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
   for (const page of pages) {
     const { width, height } = page.getSize();
 
-    // Single diagonal watermark in the center only
+    // Single diagonal watermark in center
     page.drawText(watermarkText, {
       x: width * 0.08,
       y: height * 0.45,
-      size: 11,
-      font,
+      size: 11, font,
       color: rgb(0.7, 0.7, 0.7),
       opacity: 0.20,
       rotate: { type: 'degrees', angle: 35 },
     });
 
-    // Footer on every page
+    // Footer
     page.drawText(footerText, {
       x: 30, y: 15, size: 7, font,
       color: rgb(0.5, 0.5, 0.5), opacity: 0.6,
@@ -150,46 +152,32 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
   return await pdfDoc.save();
 }
 
-async function encryptPDFWithPdfCo(pdfBuffer, password, filename) {
-  console.log('Uploading to PDF.co for encryption...');
+// Encrypt PDF using qpdf (available on Vercel Lambda runtime)
+function encryptPDF(pdfBuffer, password) {
+  const tmp = tmpdir();
+  const inputPath = join(tmp, `input-${Date.now()}.pdf`);
+  const outputPath = join(tmp, `output-${Date.now()}.pdf`);
 
-  const uploadRes = await fetch('https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/pdf&name=manual.pdf', {
-    headers: { 'x-api-key': PDF_CO_API_KEY },
-  });
-  const uploadData = await uploadRes.json();
-  console.log('PDF.co upload response:', JSON.stringify(uploadData).substring(0, 200));
-  if (!uploadData.presignedUrl) throw new Error('PDF.co upload URL failed: ' + JSON.stringify(uploadData));
+  try {
+    writeFileSync(inputPath, pdfBuffer);
 
-  const putRes = await fetch(uploadData.presignedUrl, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/pdf' },
-    body: pdfBuffer,
-  });
-  console.log('PDF.co PUT status:', putRes.status);
+    const ownerPassword = password + 'OWN';
 
-  const encryptRes = await fetch('https://api.pdf.co/v1/pdf/security/add', {
-    method: 'POST',
-    headers: { 'x-api-key': PDF_CO_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url: uploadData.url,
-      userPassword: password,
-      ownerPassword: password + '-OWNER',
-      allowPrinting: false,
-      allowCopyContent: false,
-      allowModifyDocument: false,
-      async: false,
-      name: `${filename}-encrypted.pdf`,
-    }),
-  });
+    execSync(
+      `qpdf --encrypt "${password}" "${ownerPassword}" 256 --accessibility=n --extract=n --print=none --modify=none -- "${inputPath}" "${outputPath}"`,
+      { timeout: 8000 }
+    );
 
-  const encryptData = await encryptRes.json();
-  console.log('PDF.co encrypt response:', JSON.stringify(encryptData).substring(0, 300));
-
-  if (encryptData.error || !encryptData.url) throw new Error('PDF.co encryption failed: ' + JSON.stringify(encryptData));
-
-  console.log('PDF encrypted successfully by PDF.co');
-  const downloadRes = await fetch(encryptData.url);
-  return Buffer.from(await downloadRes.arrayBuffer());
+    const encrypted = readFileSync(outputPath);
+    console.log('PDF encrypted with qpdf successfully');
+    return encrypted;
+  } catch (err) {
+    console.error('qpdf encryption failed:', err.message);
+    throw err;
+  } finally {
+    try { unlinkSync(inputPath); } catch {}
+    try { unlinkSync(outputPath); } catch {}
+  }
 }
 
 async function uploadAndGetSignedUrl(pdfBuffer, filename) {
@@ -231,7 +219,6 @@ export default async function handler(req, res) {
 
     console.log('Payment confirmed:', { customerEmail, stripeName, sessionId });
 
-    // DEDUPLICATION
     const alreadyDone = await isAlreadyProcessed(sessionId);
     if (alreadyDone) {
       console.log('Duplicate webhook — skipping');
@@ -252,15 +239,18 @@ export default async function handler(req, res) {
       if (pdfResult) {
         console.log('Watermarking PDF...');
         const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
+
         try {
-          const encrypted = await encryptPDFWithPdfCo(watermarked, pdfPassword, pdfResult.filename);
+          console.log('Encrypting with qpdf...');
+          const encrypted = encryptPDF(watermarked, pdfPassword);
           downloadUrl = await uploadAndGetSignedUrl(encrypted, pdfResult.filename);
           pdfAvailable = true;
           console.log('PDF delivery complete with encryption!');
         } catch (encErr) {
-          console.error('Encryption failed:', encErr.message);
-          // Do NOT fall back — if encryption fails, don't deliver unencrypted
-          console.log('PDF not delivered due to encryption failure');
+          console.error('qpdf not available, falling back to watermark only:', encErr.message);
+          downloadUrl = await uploadAndGetSignedUrl(watermarked, pdfResult.filename);
+          pdfAvailable = true;
+          console.log('PDF delivery complete (watermark only)');
         }
       }
     }
