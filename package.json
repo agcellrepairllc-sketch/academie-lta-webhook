@@ -1,7 +1,7 @@
 {
   "name": "academie-lta-webhook",
-  "version": "2.0.0",
-  "description": "Stripe webhook handler for Académie LTA — PDF delivery with watermarking",
+  "version": "3.0.0",
+  "description": "Stripe webhook handler for Académie LTA — PDF delivery with watermarking and encryption",
   "type": "module",
   "main": "api/webhook.js",
   "scripts": {
