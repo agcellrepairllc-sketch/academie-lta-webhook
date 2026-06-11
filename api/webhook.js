@@ -58,36 +58,40 @@ async function isAlreadyProcessed(sessionId) {
   }
 }
 
-async function lookupProfessionalOrder(email, name) {
+// Look up form name AND professional order from Google Sheets
+async function lookupFromSheet(email, stripeName) {
   try {
     const res = await fetch(GOOGLE_SHEET_API);
     const data = await res.json();
     const rows = data.rows || data.data || [];
 
+    // Match by email, prefer rows with non-empty Professional Order
     let matchedRows = rows.filter(r => {
       const rowEmail = r.Email || r.email || r.Courriel || '';
       const rowOrder = r['Professional Order'] || r['Ordre Professionnel'] || '';
       return rowEmail.toLowerCase() === email.toLowerCase() && rowOrder.trim() !== '';
     });
 
-    if (matchedRows.length === 0 && name) {
+    // Fallback: match by Stripe name
+    if (matchedRows.length === 0 && stripeName) {
       matchedRows = rows.filter(r => {
         const rowName = r.Name || r.name || r.Nom || '';
         const rowOrder = r['Professional Order'] || r['Ordre Professionnel'] || '';
-        return rowName.toLowerCase() === name.toLowerCase() && rowOrder.trim() !== '';
+        return rowName.toLowerCase() === stripeName.toLowerCase() && rowOrder.trim() !== '';
       });
     }
 
     if (matchedRows.length > 0) {
       const latest = matchedRows[matchedRows.length - 1];
       const order = latest['Professional Order'] || latest['Ordre Professionnel'] || '';
-      console.log(`Found professional order: "${order}"`);
-      return order;
+      const formName = latest['Name'] || latest['Nom'] || stripeName || '';
+      console.log(`Found — Form name: "${formName}", Order: "${order}"`);
+      return { formName, order };
     }
   } catch (err) {
-    console.error('Error looking up professional order:', err.message);
+    console.error('Error looking up from sheet:', err.message);
   }
-  return '';
+  return { formName: stripeName, order: '' };
 }
 
 async function downloadPDF(order) {
@@ -114,11 +118,15 @@ async function downloadPDF(order) {
   }
 }
 
-async function watermarkPDF(pdfBuffer, customerName, date) {
+async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const pages = pdfDoc.getPages();
-  const watermarkText = `Matériel d'étude personnel pour : ${customerName}`;
+
+  // Show both names on watermark for legal protection
+  const watermarkText = stripeName && stripeName !== formName
+    ? `Matériel d'étude personnel pour : ${formName} (${stripeName})`
+    : `Matériel d'étude personnel pour : ${formName}`;
 
   for (const page of pages) {
     const { width, height } = page.getSize();
@@ -129,12 +137,17 @@ async function watermarkPDF(pdfBuffer, customerName, date) {
     ];
     for (const pos of positions) {
       page.drawText(watermarkText, {
-        x: pos.x, y: pos.y, size: 11, font,
+        x: pos.x, y: pos.y, size: 10, font,
         color: rgb(0.7, 0.7, 0.7), opacity: 0.20,
         rotate: { type: 'degrees', angle: 35 },
       });
     }
-    page.drawText(`Matériel d'étude personnel pour : ${customerName} — Académie LTA — ${date} — © Usage personnel uniquement`, {
+    // Footer with both names
+    const footerText = stripeName && stripeName !== formName
+      ? `© Académie LTA — ${formName} (${stripeName}) — ${date} — Usage personnel uniquement`
+      : `© Académie LTA — ${formName} — ${date} — Usage personnel uniquement`;
+
+    page.drawText(footerText, {
       x: 30, y: 20, size: 7, font,
       color: rgb(0.5, 0.5, 0.5), opacity: 0.5,
     });
@@ -210,13 +223,13 @@ export default async function handler(req, res) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const customerEmail = session.customer_email || session.customer_details?.email || '';
-    const customerName = session.customer_details?.name || '';
+    const stripeName = session.customer_details?.name || '';
     const amountCents = session.amount_total || 0;
     const sessionId = session.id;
     const currency = session.currency?.toUpperCase() || 'CAD';
     const date = new Date().toLocaleDateString('fr-CA');
 
-    console.log('Payment confirmed:', { customerEmail, customerName, sessionId });
+    console.log('Payment confirmed:', { customerEmail, stripeName, sessionId });
 
     // DEDUPLICATION — check if already processed
     const alreadyDone = await isAlreadyProcessed(sessionId);
@@ -225,9 +238,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ received: true, skipped: true });
     }
 
-    const professionalOrder = await lookupProfessionalOrder(customerEmail, customerName);
+    // Look up form name + professional order from Google Sheets
+    const { formName, order: professionalOrder } = await lookupFromSheet(customerEmail, stripeName);
     const productLabel = professionalOrder ? `Manuel OQLF — ${professionalOrder}` : 'Manuel OQLF';
     const pdfPassword = generatePassword();
+
+    console.log(`Form name: "${formName}", Stripe name: "${stripeName}", Order: "${professionalOrder}"`);
 
     let downloadUrl = null;
     let pdfAvailable = false;
@@ -235,8 +251,8 @@ export default async function handler(req, res) {
     if (professionalOrder) {
       const pdfResult = await downloadPDF(professionalOrder);
       if (pdfResult) {
-        console.log('Watermarking PDF...');
-        const watermarked = await watermarkPDF(pdfResult.buffer, customerName, date);
+        console.log('Watermarking PDF with both names...');
+        const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
         try {
           const encrypted = await encryptPDFWithPdfCo(watermarked, pdfPassword, pdfResult.filename);
           downloadUrl = await uploadAndGetSignedUrl(encrypted, pdfResult.filename);
@@ -256,10 +272,11 @@ export default async function handler(req, res) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contactEmail: customerEmail,
-          contactName: customerName,
+          contactName: formName,
           data: {
             product_label: productLabel,
             professional_order: professionalOrder,
+            stripe_name: stripeName,
             amount_cents: amountCents,
             stripe_session_id: sessionId,
             currency: currency,
