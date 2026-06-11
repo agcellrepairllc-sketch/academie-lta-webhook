@@ -107,7 +107,9 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
 
 async function encryptViaRender(pdfBuffer, password) {
   console.log('Sending to Render for encryption...');
-  const pdfBase64 = pdfBuffer.toString('base64');
+  let pdfBase64 = pdfBuffer.toString('base64');
+  // Ensure valid base64 padding
+  while (pdfBase64.length % 4 !== 0) pdfBase64 += '=';
   const resp = await fetch(RENDER_ENCRYPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
