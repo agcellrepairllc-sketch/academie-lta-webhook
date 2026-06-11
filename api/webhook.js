@@ -102,7 +102,7 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
     page.drawText(wmText,{x:width*0.08,y:height*0.45,size:11,font,color:rgb(0.7,0.7,0.7),opacity:0.20,rotate:{type:'degrees',angle:35}});
     page.drawText(ftText,{x:30,y:15,size:7,font,color:rgb(0.5,0.5,0.5),opacity:0.6});
   }
-  return await pdfDoc.save();
+  return await pdfDoc.save({ useObjectStreams: false });
 }
 
 async function encryptViaRender(pdfBuffer, password) {
