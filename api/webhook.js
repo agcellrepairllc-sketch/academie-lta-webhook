@@ -20,6 +20,59 @@ const s3 = new S3Client({
 
 export const config = { api: { bodyParser: false } };
 
+// ─── PRODUCT REGISTRY ───────────────────────────────────────────────────────
+const PRODUCTS = {
+  'price_1TiPJGG28GGFb8g3mTOylxoY': {
+    name: 'Manuel Uniquement',
+    label: 'Manuel Uniquement',
+    amountDisplay: 'CA$298.99',
+    includesManuel: true,
+    includesClasses: false,
+    classHours: 0,
+  },
+  'price_1Ti0yyG28GGFb8g3kYvzlEMd': {
+    name: 'Forfait Débutant A1-A2',
+    label: 'Forfait Débutant (A1-A2)',
+    amountDisplay: 'CA$1,495',
+    includesManuel: true,
+    includesClasses: true,
+    classHours: 25,
+  },
+  'price_1Ti17cG28GGFb8g3wHe0Q4QX': {
+    name: 'Forfait Élémentaire A2-B1',
+    label: 'Forfait Élémentaire (A2-B1)',
+    amountDisplay: 'CA$995',
+    includesManuel: true,
+    includesClasses: true,
+    classHours: 15,
+  },
+  'price_1Ti1kSG28GGFb8g3l3GpIeDv': {
+    name: 'Forfait Réussite OQLF B1-B2',
+    label: 'Forfait Réussite OQLF (B1-B2)',
+    amountDisplay: 'CA$795',
+    includesManuel: true,
+    includesClasses: true,
+    classHours: 10,
+  },
+  'price_1Ti1lmG28GGFb8g3cLalrUIN': {
+    name: 'Forfait VIP',
+    label: 'Forfait VIP ⭐',
+    amountDisplay: 'CA$1,795',
+    includesManuel: true,
+    includesClasses: true,
+    classHours: 30,
+  },
+  'price_1TiOnQG28GGFb8g3jGa0B7cO': {
+    name: 'Cours à la carte',
+    label: 'Cours à la carte',
+    amountDisplay: 'CA$60/heure',
+    includesManuel: false,
+    includesClasses: true,
+    classHours: null, // variable
+  },
+};
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
 function generatePassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const seg = () => Array.from({length:4},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
@@ -102,27 +155,21 @@ async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
     page.drawText(wmText,{x:width*0.08,y:height*0.45,size:11,font,color:rgb(0.7,0.7,0.7),opacity:0.20,rotate:{type:'degrees',angle:35}});
     page.drawText(ftText,{x:30,y:15,size:7,font,color:rgb(0.5,0.5,0.5),opacity:0.6});
   }
-  const pdfBytes = await pdfDoc.save({ useObjectStreams: false, addDefaultPage: false });
-  return Buffer.from(pdfBytes);
-
+  return await pdfDoc.save({useObjectStreams:false,addDefaultPage:false});
 }
 
 async function encryptViaRender(pdfBuffer, password) {
   console.log('Sending to Render for encryption...');
   let pdfBase64 = pdfBuffer.toString('base64');
-  // Ensure valid base64 padding
-  while (pdfBase64.length % 4 !== 0) pdfBase64 += '=';
-  const resp = await fetch(RENDER_ENCRYPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pdf_base64: pdfBase64, password }),
+  while(pdfBase64.length%4!==0) pdfBase64+='=';
+  const resp = await fetch(RENDER_ENCRYPT_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pdf_base64:pdfBase64,password}),
   });
-  if(!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Render encrypt failed: ${resp.status} ${errText}`);
-  }
+  if(!resp.ok){const e=await resp.text();throw new Error(`Render encrypt failed: ${resp.status} ${e}`);}
   const encrypted = Buffer.from(await resp.arrayBuffer());
-  console.log('PDF encrypted via Render successfully!');
+  console.log('PDF encrypted via Render!');
   return encrypted;
 }
 
@@ -134,6 +181,7 @@ async function uploadAndGetSignedUrl(pdfBuffer, filename) {
   return url;
 }
 
+// ─── MAIN HANDLER ───────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if(req.method!=='POST') return res.status(405).json({error:'Method not allowed'});
 
@@ -156,39 +204,55 @@ export default async function handler(req, res) {
     const currency = session.currency?.toUpperCase()||'CAD';
     const date = new Date().toLocaleDateString('fr-CA');
 
-    console.log('Payment confirmed:',{customerEmail,stripeName,sessionId});
+    // Identify product from line items
+    let priceId = '';
+    try {
+      const lineItems = await stripe.checkout.sessions.listLineItems(sessionId,{limit:1});
+      priceId = lineItems.data[0]?.price?.id || '';
+    } catch(err){console.error('Could not get line items:',err.message);}
+
+    const product = PRODUCTS[priceId] || {
+      name: 'Académie LTA',
+      label: 'Commande',
+      amountDisplay: `CA$${(amountCents/100).toFixed(2)}`,
+      includesManuel: true,
+      includesClasses: false,
+      classHours: 0,
+    };
+
+    console.log(`Payment confirmed: ${customerEmail} | Product: ${product.name} | Session: ${sessionId}`);
 
     if(await isAlreadyProcessed(sessionId)){
       return res.status(200).json({received:true,skipped:true});
     }
 
     const {formName,order:professionalOrder} = await lookupFromSheet(customerEmail,stripeName);
-    const productLabel = professionalOrder?`Manuel OQLF — ${professionalOrder}`:'Manuel OQLF';
     const pdfPassword = generatePassword();
 
-    console.log(`Form: "${formName}", Stripe: "${stripeName}", Order: "${professionalOrder}"`);
+    console.log(`Form: "${formName}", Stripe: "${stripeName}", Order: "${professionalOrder}", Product: "${product.name}"`);
 
+    // PDF delivery (only for products that include the manual)
     let downloadUrl=null, pdfAvailable=false;
 
-    if(professionalOrder){
+    if(product.includesManuel && professionalOrder){
       const pdfResult = await downloadPDF(professionalOrder);
       if(pdfResult){
-        console.log('Watermarking...');
+        console.log('Watermarking PDF...');
         const watermarked = await watermarkPDF(pdfResult.buffer,formName,stripeName,date);
         try {
-          const encrypted = await encryptViaRender(watermarked, pdfPassword);
+          const encrypted = await encryptViaRender(Buffer.from(watermarked),pdfPassword);
           downloadUrl = await uploadAndGetSignedUrl(encrypted,pdfResult.filename);
           pdfAvailable = true;
           console.log('PDF delivery complete with encryption!');
         } catch(encErr){
-          console.error('Render encryption failed, watermark only:',encErr.message);
-          downloadUrl = await uploadAndGetSignedUrl(watermarked,pdfResult.filename);
+          console.error('Encryption failed, watermark only:',encErr.message);
+          downloadUrl = await uploadAndGetSignedUrl(Buffer.from(watermarked),pdfResult.filename);
           pdfAvailable = true;
-          console.log('PDF delivery complete (watermark only)');
         }
       }
     }
 
+    // Trigger PaygoGPT flow
     try {
       const resp = await fetch(PAYGOGPT_FLOW_WEBHOOK,{
         method:'POST',
@@ -197,20 +261,25 @@ export default async function handler(req, res) {
           contactEmail:customerEmail,
           contactName:formName,
           data:{
-            product_label:productLabel,
+            product_name:product.name,
+            product_label:product.label,
             professional_order:professionalOrder,
             stripe_name:stripeName,
             amount_cents:amountCents,
+            amount_display:product.amountDisplay,
             stripe_session_id:sessionId,
             currency,
             download_url:downloadUrl||'',
             pdf_password:pdfPassword,
             pdf_available:pdfAvailable?'yes':'no',
+            includes_manuel:product.includesManuel?'yes':'no',
+            includes_classes:product.includesClasses?'yes':'no',
+            class_hours:product.classHours||'',
           },
         }),
       });
       if(!resp.ok) console.error('Flow trigger failed:',await resp.text());
-      else console.log('Flow 3277 triggered successfully');
+      else console.log('Flow triggered successfully');
     } catch(err){console.error('Flow error:',err.message);}
   }
 
