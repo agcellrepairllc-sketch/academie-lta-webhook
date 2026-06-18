@@ -37,6 +37,15 @@ const PRODUCTS = {
     includesClasses: true,
     classHours: 25,
   },
+  // TEST MODE price for Forfait Débutant — remove once live testing is done
+  'price_1TjY6CG28GGFb8g3n2Y3B81w': {
+    name: 'Forfait Débutant A1-A2',
+    label: 'Forfait Débutant (A1-A2)',
+    amountDisplay: 'CA$1,495',
+    includesManuel: true,
+    includesClasses: true,
+    classHours: 25,
+  },
   'price_1Ti17cG28GGFb8g3wHe0Q4QX': {
     name: 'Forfait Élémentaire A2-B1',
     label: 'Forfait Élémentaire (A2-B1)',
