@@ -6,7 +6,8 @@ import { GoogleAuth } from 'google-auth-library';
 import { google } from 'googleapis';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK;
+const PAYGOGPT_FLOW_WEBHOOK = process.env.PAYGOGPT_FLOW_WEBHOOK; // flow 4275 — form submission only
+const PAYGOGPT_PDF_WEBHOOK = 'https://app.paygogpt.com/api/webhooks/flow/4276/4a4d2faafff257132ecf4af2b229781f2ec75fabce8b65d7f2a774839cf6e792'; // flow 4276 — PDF delivery after payment
 const RENDER_ENCRYPT_URL = 'https://pronunciation-api-l0pg.onrender.com/encrypt-pdf';
 
 // Private Google Sheet — Orders tab
@@ -94,7 +95,6 @@ async function lookupFromSheet(email, stripeName) {
       return { formName: stripeName, order: '' };
     }
 
-    // Find last matching row by email
     const dataRows = rows.slice(1);
     const matched = dataRows.filter(row => {
       const rowEmail = (row[emailCol] || '').toLowerCase().trim();
@@ -102,7 +102,6 @@ async function lookupFromSheet(email, stripeName) {
       return rowEmail === email.toLowerCase().trim() && rowOrder !== '';
     });
 
-    // Fallback: match by name
     if (matched.length === 0 && stripeName) {
       const byName = dataRows.filter(row => {
         const rowName = (row[nameCol] || '').toLowerCase().trim();
@@ -312,8 +311,9 @@ export default async function handler(req, res) {
     const totalQuantity = recognizedItems.reduce((sum, { item }) => sum + (item.quantity || 1), 0);
     const primaryPdf = pdfItems[0];
 
+    // Fire flow 4276 — PDF delivery email (only fires after confirmed payment)
     try {
-      const resp = await fetch(PAYGOGPT_FLOW_WEBHOOK, {
+      const resp = await fetch(PAYGOGPT_PDF_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -321,19 +321,14 @@ export default async function handler(req, res) {
           contactName: formName,
           data: {
             product_name: productNames,
-            product_label: productNames,
             professional_order: professionalOrder,
             stripe_name: stripeName,
-            amount_cents: sessionTotal,
             amount_display: `CA$${(sessionTotal / 100).toFixed(2)}`,
             stripe_session_id: sessionId,
             currency,
             download_url: primaryPdf?.downloadUrl || '',
             pdf_password: primaryPdf?.pdfPassword || '',
             pdf_available: pdfItems.length > 0 ? 'yes' : 'no',
-            all_download_urls: pdfItems.map(r => r.downloadUrl).join('\n'),
-            all_pdf_passwords: pdfItems.map(r => `${r.product.label}: ${r.pdfPassword}`).join('\n'),
-            pdf_count: String(pdfItems.length),
             includes_classes: classItems.length > 0 ? 'yes' : 'no',
             class_hours: totalClassHours > 0 ? String(totalClassHours) : '',
             includes_manuel: pdfItems.length > 0 ? 'yes' : 'no',
@@ -341,10 +336,10 @@ export default async function handler(req, res) {
           },
         }),
       });
-      if (!resp.ok) console.error('Flow trigger failed:', await resp.text());
-      else console.log('Flow triggered successfully');
+      if (!resp.ok) console.error('PDF flow trigger failed:', await resp.text());
+      else console.log('Flow 4276 triggered successfully — PDF delivery email sent');
     } catch (err) {
-      console.error('Flow error:', err.message);
+      console.error('Flow 4276 error:', err.message);
     }
   }
 
