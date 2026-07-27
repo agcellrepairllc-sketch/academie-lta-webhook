@@ -1,11 +1,7 @@
 // api/check-evaluation.js
-// Checks if a customer has already purchased an evaluation
-// Returns { purchased: true/false }
-// Uses PAYGOGPT_LTA_API_KEY — LTA account only (separate from AG Cellular)
-
 export const config = { api: { bodyParser: true } };
 
-const PAYGOGPT_API_BASE = 'https://paymegpt.com';
+const PAYGOGPT_API_BASE = 'https://app.paygogpt.com';
 const PAYGOGPT_LTA_API_KEY = process.env.PAYGOGPT_LTA_API_KEY;
 const EVALUATION_TAG = 'evaluation-achetee';
 
@@ -20,51 +16,46 @@ export default async function handler(req, res) {
   const { email } = req.query;
   if (!email) return res.status(400).json({ error: 'Missing email parameter' });
 
+  if (!PAYGOGPT_LTA_API_KEY) {
+    return res.status(200).json({ purchased: false, debug: 'PAYGOGPT_LTA_API_KEY not set' });
+  }
+
   try {
-    // Search contact by email
-    const searchResp = await fetch(
-      `${PAYGOGPT_API_BASE}/api/v1/contacts/search?email=${encodeURIComponent(email)}&limit=1`,
-      {
-        headers: {
-          'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    const searchUrl = `${PAYGOGPT_API_BASE}/api/v1/contacts/search?email=${encodeURIComponent(email)}&limit=1`;
+
+    const searchResp = await fetch(searchUrl, {
+      headers: {
+        'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const searchText = await searchResp.text();
 
     if (!searchResp.ok) {
-      console.error('PaygoGPT LTA search failed:', searchResp.status, await searchResp.text());
-      return res.status(200).json({ purchased: false });
+      return res.status(200).json({ purchased: false, debug: { status: searchResp.status, body: searchText } });
     }
 
-    const data = await searchResp.json();
+    const data = JSON.parse(searchText);
     const contacts = data.contacts || [];
 
     if (contacts.length === 0) {
-      console.log(`No contact found for ${email}`);
-      return res.status(200).json({ purchased: false });
+      return res.status(200).json({ purchased: false, debug: 'no contact found' });
     }
 
-    // Get full contact details to check tags
     const contact = contacts[0];
     const contactId = contact.publicId || contact.contactId || contact.id;
 
-    const detailResp = await fetch(
-      `${PAYGOGPT_API_BASE}/api/v1/contacts/${contactId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Fetch full contact details to get tags
+    const detailResp = await fetch(`${PAYGOGPT_API_BASE}/api/v1/contacts/${contactId}`, {
+      headers: {
+        'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-    if (!detailResp.ok) {
-      console.error('Contact detail fetch failed:', detailResp.status);
-      return res.status(200).json({ purchased: false });
-    }
-
-    const contactDetail = await detailResp.json();
+    const detailText = await detailResp.text();
+    const contactDetail = JSON.parse(detailText);
     const tags = contactDetail.tags || contactDetail.contact?.tags || [];
 
     const hasPurchased = tags.some(tag => {
@@ -72,11 +63,12 @@ export default async function handler(req, res) {
       return tagName === EVALUATION_TAG;
     });
 
-    console.log(`Check evaluation for ${email}: purchased=${hasPurchased}, tags=${JSON.stringify(tags)}`);
-    return res.status(200).json({ purchased: hasPurchased });
+    return res.status(200).json({ 
+      purchased: hasPurchased,
+      debug: { contactId, tags }
+    });
 
   } catch (err) {
-    console.error('Check evaluation error:', err.message);
-    return res.status(200).json({ purchased: false });
+    return res.status(200).json({ purchased: false, debug: { error: err.message } });
   }
 }
