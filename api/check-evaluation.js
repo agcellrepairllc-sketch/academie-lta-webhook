@@ -5,7 +5,7 @@
 
 export const config = { api: { bodyParser: true } };
 
-const PAYGOGPT_API_BASE = 'https://app.paymegpt.com/api';
+const PAYGOGPT_API_BASE = 'https://paymegpt.com';
 const PAYGOGPT_LTA_API_KEY = process.env.PAYGOGPT_LTA_API_KEY;
 const EVALUATION_TAG = 'evaluation-achetee';
 
@@ -21,8 +21,9 @@ export default async function handler(req, res) {
   if (!email) return res.status(400).json({ error: 'Missing email parameter' });
 
   try {
+    // Search contact by email
     const searchResp = await fetch(
-      `${PAYGOGPT_API_BASE}/contacts?email=${encodeURIComponent(email)}&limit=1`,
+      `${PAYGOGPT_API_BASE}/api/v1/contacts/search?email=${encodeURIComponent(email)}&limit=1`,
       {
         headers: {
           'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
@@ -32,25 +33,46 @@ export default async function handler(req, res) {
     );
 
     if (!searchResp.ok) {
-      console.error('PaygoGPT LTA search failed:', searchResp.status);
+      console.error('PaygoGPT LTA search failed:', searchResp.status, await searchResp.text());
       return res.status(200).json({ purchased: false });
     }
 
     const data = await searchResp.json();
-    const contacts = data.contacts || data.data || [];
+    const contacts = data.contacts || [];
 
     if (contacts.length === 0) {
+      console.log(`No contact found for ${email}`);
       return res.status(200).json({ purchased: false });
     }
 
+    // Get full contact details to check tags
     const contact = contacts[0];
-    const tags = contact.tags || [];
+    const contactId = contact.publicId || contact.contactId || contact.id;
 
-    const hasPurchased = tags.some(tag =>
-      (typeof tag === 'string' ? tag : tag.name || tag.label || '') === EVALUATION_TAG
+    const detailResp = await fetch(
+      `${PAYGOGPT_API_BASE}/api/v1/contacts/${contactId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${PAYGOGPT_LTA_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
     );
 
-    console.log(`Check evaluation for ${email}: purchased=${hasPurchased}`);
+    if (!detailResp.ok) {
+      console.error('Contact detail fetch failed:', detailResp.status);
+      return res.status(200).json({ purchased: false });
+    }
+
+    const contactDetail = await detailResp.json();
+    const tags = contactDetail.tags || contactDetail.contact?.tags || [];
+
+    const hasPurchased = tags.some(tag => {
+      const tagName = typeof tag === 'string' ? tag : (tag.name || tag.label || tag.slug || '');
+      return tagName === EVALUATION_TAG;
+    });
+
+    console.log(`Check evaluation for ${email}: purchased=${hasPurchased}, tags=${JSON.stringify(tags)}`);
     return res.status(200).json({ purchased: hasPurchased });
 
   } catch (err) {
