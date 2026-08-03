@@ -326,6 +326,7 @@ export default async function handler(req, res) {
             amount_display: `CA$${(sessionTotal / 100).toFixed(2)}`,
             stripe_session_id: sessionId,
             currency,
+            current_date: date,
             download_url: primaryPdf?.downloadUrl || '',
             pdf_password: primaryPdf?.pdfPassword || '',
             pdf_available: pdfItems.length > 0 ? 'yes' : 'no',
