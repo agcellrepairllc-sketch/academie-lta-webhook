@@ -11,8 +11,8 @@ const PAYGOGPT_PDF_WEBHOOK = 'https://app.paygogpt.com/api/webhooks/flow/4276/4a
 const RENDER_ENCRYPT_URL = 'https://pronunciation-api-l0pg.onrender.com/encrypt-pdf';
 
 // Private Google Sheet — Orders tab
-const SHEET_ID = '1vFIv6TDkQphBNVS8Hc4sUOIA7ZLs2sq8d3sEteST3PI';
-const SHEET_TAB = 'Orders';
+const SHEET_ID = '1Ia4M7Lk2UsrCXwolCwzJ0uA0jAqthxMrYceBbPDtEMQ';
+const SHEET_TAB = 'Sheet1';
 
 const s3 = new S3Client({
   region: process.env.AWS_REGION || 'us-east-1',
