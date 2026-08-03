@@ -1,8 +1,8 @@
 import { GoogleAuth } from 'google-auth-library';
 import { google } from 'googleapis';
 
-const SHEET_ID = '1vFIv6TDkQphBNVS8Hc4sUOIA7ZLs2sq8d3sEteST3PI';
-const SHEET_TAB = 'Orders';
+const SHEET_ID = '1Ia4M7Lk2UsrCXwolCwzJ0uA0jAqthxMrYceBbPDtEMQ';
+const SHEET_TAB = 'Sheet1';
 
 export const config = { api: { bodyParser: true } };
 
