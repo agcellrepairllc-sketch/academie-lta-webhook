@@ -319,6 +319,7 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           contactEmail: customerEmail,
           contactName: formName,
+          widgetId: 97667780,
           data: {
             product_name: productNames,
             professional_order: professionalOrder,
