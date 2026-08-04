@@ -317,9 +317,19 @@ export default async function handler(req, res) {
     const totalQuantity = recognizedItems.reduce((sum, { item }) => sum + (item.quantity || 1), 0);
     const primaryPdf = pdfItems[0];
 
-    // Fire flow 4276 — PDF delivery email (only fires after confirmed payment)
+    // Determine which flow to fire based on product type
+    const FLOW_CLASSES_ONLY = 'https://app.paygogpt.com/api/webhooks/flow/4721/0cc996c684f8d785bd582f79a8fe096dc033d7d4d2a5667ad44baa27db6c0ff6';
+    const FLOW_PACKAGE = 'https://app.paygogpt.com/api/webhooks/flow/4722/222aca1740711dad87721e1c201bd87c1fc1ef291e8f48ebfc9c75e8c07d67c9';
+    let targetWebhook = PAYGOGPT_PDF_WEBHOOK;
+    if (pdfItems.length > 0 && classItems.length > 0) {
+      targetWebhook = FLOW_PACKAGE;
+    } else if (pdfItems.length === 0 && classItems.length > 0) {
+      targetWebhook = FLOW_CLASSES_ONLY;
+    }
+
+    // Fire appropriate flow after confirmed payment
     try {
-      const resp = await fetch(PAYGOGPT_PDF_WEBHOOK, {
+      const resp = await fetch(targetWebhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
