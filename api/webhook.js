@@ -307,7 +307,13 @@ export default async function handler(req, res) {
 
     const pdfItems = results.filter(r => r.pdfAvailable);
     const classItems = results.filter(r => r.product.includesClasses);
-    const totalClassHours = classItems.reduce((sum, r) => sum + (r.product.classHours ? r.product.classHours * (r.item.quantity || 1) : 0), 0);
+    const totalClassHours = classItems.reduce((sum, r) => {
+      if (r.product.classHours !== null) {
+        return sum + (r.product.classHours * (r.item.quantity || 1));
+      }
+      // Cours à la carte — use Stripe quantity as hours
+      return sum + (r.item.quantity || 1);
+    }, 0);
     const totalQuantity = recognizedItems.reduce((sum, { item }) => sum + (item.quantity || 1), 0);
     const primaryPdf = pdfItems[0];
 
