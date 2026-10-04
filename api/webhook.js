@@ -41,7 +41,7 @@ const PRODUCTS = {
   'price_1UMyYGG28GGFb8g3diK9x6bZ': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,150', includesManuel: true, includesClasses: true, classHours: 25 },
   'price_1UMyMzG28GGFb8g3DjJGIglJ': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$720', includesManuel: true, includesClasses: true, classHours: 15 },
   'price_1UMySeG28GGFb8g3Jwfdus0P': { name: 'Forfait Réussite OQLF B1-B2', label: 'Forfait Réussite OQLF (B1-B2)', amountDisplay: 'CA$520', includesManuel: true, includesClasses: true, classHours: 10 },
-  'price_1Ti1lmG28GGFb8g3cLalrUIN': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,795', includesManuel: true, includesClasses: true, classHours: 30 },
+  'price_1UMyenG28GGFb8g3K8PqSK1G': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,350', includesManuel: true, includesClasses: true, classHours: 30 },
   'price_1TiOnQG28GGFb8g3jGa0B7cO': { name: 'Cours à la carte', label: 'Cours à la carte', amountDisplay: 'CA$60/heure', includesManuel: false, includesClasses: true, classHours: null },
 };
 
@@ -50,7 +50,7 @@ const WEBSHOP_PRODUCTS = {
   'FORFAIT-DEBUTANT': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,150', includesManuel: true, includesClasses: true, classHours: 25 },
   'FORFAIT-ELEMENTAIRE': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$720', includesManuel: true, includesClasses: true, classHours: 15 },
   'FORFAIT-REUSSITE': { name: 'Forfait Réussite OQLF B1-B2', label: 'Forfait Réussite OQLF (B1-B2)', amountDisplay: 'CA$520', includesManuel: true, includesClasses: true, classHours: 10 },
-  'FORFAIT-VIP': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,795', includesManuel: true, includesClasses: true, classHours: 30 },
+  'FORFAIT-VIP': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,350', includesManuel: true, includesClasses: true, classHours: 30 },
   'COURS-CARTE': { name: 'Cours à la carte', label: 'Cours à la carte', amountDisplay: 'CA$60/heure', includesManuel: false, includesClasses: true, classHours: null },
 };
 
