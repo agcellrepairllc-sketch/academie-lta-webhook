@@ -38,8 +38,7 @@ async function getSheetsClient() {
 // ─── PRODUCT REGISTRY ─────────────────────────────────────────────────────────
 const PRODUCTS = {
   'price_1TiPJGG28GGFb8g3mTOylxoY': { name: 'Manuel Uniquement', label: 'Manuel Uniquement', amountDisplay: 'CA$298.99', includesManuel: true, includesClasses: false, classHours: 0 },
-  'price_1Ti0yyG28GGFb8g3kYvzlEMd': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,495', includesManuel: true, includesClasses: true, classHours: 25 },
-  'price_1TjY6CG28GGFb8g3n2Y3B81w': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,495', includesManuel: true, includesClasses: true, classHours: 25 },
+  'price_1UMy2tG28GGFb8g3DkAhxYZi': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,200', includesManuel: true, includesClasses: true, classHours: 25 },
   'price_1Ti17cG28GGFb8g3wHe0Q4QX': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$995', includesManuel: true, includesClasses: true, classHours: 15 },
   'price_1Ti1kSG28GGFb8g3l3GpIeDv': { name: 'Forfait Réussite OQLF B1-B2', label: 'Forfait Réussite OQLF (B1-B2)', amountDisplay: 'CA$795', includesManuel: true, includesClasses: true, classHours: 10 },
   'price_1Ti1lmG28GGFb8g3cLalrUIN': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,795', includesManuel: true, includesClasses: true, classHours: 30 },
@@ -48,7 +47,7 @@ const PRODUCTS = {
 
 const WEBSHOP_PRODUCTS = {
   'MANUEL-OQLF': { name: 'Manuel OQLF', label: 'Manuel OQLF', amountDisplay: 'CA$298.99', includesManuel: true, includesClasses: false, classHours: 0 },
-  'FORFAIT-DEBUTANT': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,495', includesManuel: true, includesClasses: true, classHours: 25 },
+  'FORFAIT-DEBUTANT': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,200', includesManuel: true, includesClasses: true, classHours: 25 },
   'FORFAIT-ELEMENTAIRE': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$995', includesManuel: true, includesClasses: true, classHours: 15 },
   'FORFAIT-REUSSITE': { name: 'Forfait Réussite OQLF B1-B2', label: 'Forfait Réussite OQLF (B1-B2)', amountDisplay: 'CA$795', includesManuel: true, includesClasses: true, classHours: 10 },
   'FORFAIT-VIP': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,795', includesManuel: true, includesClasses: true, classHours: 30 },
