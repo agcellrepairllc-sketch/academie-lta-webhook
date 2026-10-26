@@ -38,6 +38,7 @@ async function getSheetsClient() {
 // ─── PRODUCT REGISTRY ─────────────────────────────────────────────────────────
 const PRODUCTS = {
   'price_1UPBUoG28GGFb8g33tDT1zB2': { name: "Simulation d'examen OQLF", label: "Simulation d'examen OQLF", amountDisplay: 'CA$49.99', includesManuel: false, includesClasses: false, classHours: 0, isSimulation: true, pdfFolder: 'simulations' },
+  'price_1UUemEG28GGFb8g3D5EOHZ9d': { name: 'Manuel Uniquement', label: 'Manuel Uniquement', amountDisplay: 'CA$199', includesManuel: true, includesClasses: false, classHours: 0 },
   'price_1UMym6G28GGFb8g31QIpn0xg': { name: 'Manuel Uniquement', label: 'Manuel Uniquement', amountDisplay: 'CA$199', includesManuel: true, includesClasses: false, classHours: 0 },
   'price_1UMyYGG28GGFb8g3diK9x6bZ': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,150', includesManuel: true, includesClasses: true, classHours: 25 },
   'price_1UMyMzG28GGFb8g3DjJGIglJ': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$720', includesManuel: true, includesClasses: true, classHours: 15 },
