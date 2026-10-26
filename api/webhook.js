@@ -37,6 +37,7 @@ async function getSheetsClient() {
 
 // ─── PRODUCT REGISTRY ─────────────────────────────────────────────────────────
 const PRODUCTS = {
+  'price_1UPBUoG28GGFb8g33tDT1zB2': { name: "Simulation d'examen OQLF", label: "Simulation d'examen OQLF", amountDisplay: 'CA$49.99', includesManuel: false, includesClasses: false, classHours: 0, isSimulation: true, pdfFolder: 'simulations' },
   'price_1UMym6G28GGFb8g31QIpn0xg': { name: 'Manuel Uniquement', label: 'Manuel Uniquement', amountDisplay: 'CA$199', includesManuel: true, includesClasses: false, classHours: 0 },
   'price_1UMyYGG28GGFb8g3diK9x6bZ': { name: 'Forfait Débutant A1-A2', label: 'Forfait Débutant (A1-A2)', amountDisplay: 'CA$1,150', includesManuel: true, includesClasses: true, classHours: 25 },
   'price_1UMyMzG28GGFb8g3DjJGIglJ': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$720', includesManuel: true, includesClasses: true, classHours: 15 },
@@ -131,13 +132,13 @@ async function lookupFromSheet(email, stripeName) {
 const processedSessions = new Set();
 
 // ─── PDF DELIVERY ─────────────────────────────────────────────────────────────
-async function downloadPDF(order) {
+async function downloadPDF(order, folder = 'manuals') {
   const BUCKET = process.env.S3_BUCKET || 'academielta';
   const filename = order
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-zA-Z0-9\s-]/g, '').trim()
     .replace(/\s+/g, '_');
-  const key = `manuals/${filename}.pdf`;
+  const key = `${folder}/${filename}.pdf`;
   console.log(`Looking for PDF: ${key}`);
   try {
     const resp = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
@@ -221,8 +222,8 @@ async function processLineItem(product, item, formName, stripeName, professional
   let downloadUrl = null;
   let pdfAvailable = false;
   const pdfPassword = generatePassword();
-  if (product.includesManuel && professionalOrder) {
-    const pdfResult = await downloadPDF(professionalOrder);
+  if ((product.includesManuel || product.isSimulation) && professionalOrder) {
+    const pdfResult = await downloadPDF(professionalOrder, product.pdfFolder || 'manuals');
     if (pdfResult) {
       const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
       try {
@@ -319,8 +320,12 @@ export default async function handler(req, res) {
     // Determine which flow to fire based on product type
     const FLOW_CLASSES_ONLY = 'https://app.paygogpt.com/api/webhooks/flow/4721/0cc996c684f8d785bd582f79a8fe096dc033d7d4d2a5667ad44baa27db6c0ff6';
     const FLOW_PACKAGE = 'https://app.paygogpt.com/api/webhooks/flow/4722/222aca1740711dad87721e1c201bd87c1fc1ef291e8f48ebfc9c75e8c07d67c9';
+    const FLOW_SIMULATION = 'https://app.paygogpt.com/api/webhooks/flow/6778/719540e640527c6002f1c691f0eaa9030f7738edfa6efa9df562e1d83b0b998c';
+    const isSimulationOrder = results.length > 0 && results.every(r => r.product.isSimulation);
     let targetWebhook = PAYGOGPT_PDF_WEBHOOK;
-    if (pdfItems.length > 0 && classItems.length > 0) {
+    if (isSimulationOrder) {
+      targetWebhook = FLOW_SIMULATION;
+    } else if (pdfItems.length > 0 && classItems.length > 0) {
       targetWebhook = FLOW_PACKAGE;
     } else if (pdfItems.length === 0 && classItems.length > 0) {
       targetWebhook = FLOW_CLASSES_ONLY;
