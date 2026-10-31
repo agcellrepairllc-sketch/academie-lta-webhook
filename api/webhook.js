@@ -241,6 +241,33 @@ async function processLineItem(product, item, formName, stripeName, professional
   return { downloadUrl, pdfPassword, pdfAvailable, amountDisplay, quantity };
 }
 
+// ─── UNDELIVERED-ORDER ALERT ──────────────────────────────────────────────────
+const FLOW_ALERT = 'https://app.paygogpt.com/api/webhooks/flow/8740/84206ead30e18686d6ac2ad06ac83830b0007cf397c3c5a2376158c620c4ee79';
+async function sendAlert({ reason, email, name, product, ordre, amount, sessionId }) {
+  try {
+    console.error(`ALERT — order not delivered: ${reason} | ${email} | ${sessionId}`);
+    await fetch(FLOW_ALERT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contactEmail: email,
+        contactName: name,
+        data: {
+          reason,
+          customer_name: name || '(inconnu)',
+          customer_email: email || '(inconnu)',
+          product: product || '(inconnu)',
+          ordre: ordre || '(non trouvé)',
+          amount: amount || '',
+          stripe_session_id: sessionId || '',
+        },
+      }),
+    });
+  } catch (err) {
+    console.error('Alert flow error:', err.message);
+  }
+}
+
 // ─── MAIN HANDLER ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -291,8 +318,13 @@ export default async function handler(req, res) {
       .map(item => ({ item, product: resolveProduct(item) }))
       .filter(({ product }) => !!product);
 
+    const amountPaid = `CA$${(sessionTotal / 100).toFixed(2)}`;
+    const alertBase = { email: customerEmail, name: formName || stripeName, ordre: professionalOrder, amount: amountPaid, sessionId };
+
     if (recognizedItems.length === 0) {
       console.log('No recognized products — skipping.');
+      const unknown = lineItems.map(i => `${i.description || i.price?.product?.name || '?'} (${i.price?.id || '?'})`).join(', ');
+      await sendAlert({ ...alertBase, reason: "Produit non reconnu par le webhook — aucune livraison ni courriel de confirmation n'a été envoyé au client.", product: unknown || '(aucun article)' });
       return res.status(200).json({ received: true, skipped: true });
     }
 
@@ -304,6 +336,16 @@ export default async function handler(req, res) {
     for (const { item, product } of recognizedItems) {
       const result = await processLineItem(product, item, formName, stripeName, professionalOrder, date);
       results.push({ product, item, ...result });
+    }
+
+    // Alert for any item that should have included a PDF but didn't
+    for (const r of results) {
+      if ((r.product.includesManuel || r.product.isSimulation) && !r.pdfAvailable) {
+        const reason = !professionalOrder
+          ? "Ordre professionnel introuvable dans le Google Sheet des commandes — le PDF n'a pas été envoyé."
+          : `PDF introuvable dans S3 pour l'ordre « ${professionalOrder} » — le PDF n'a pas été envoyé.`;
+        await sendAlert({ ...alertBase, reason, product: r.product.label });
+      }
     }
 
     const pdfItems = results.filter(r => r.pdfAvailable);
@@ -359,10 +401,14 @@ export default async function handler(req, res) {
           },
         }),
       });
-      if (!resp.ok) console.error('PDF flow trigger failed:', await resp.text());
-      else console.log('Flow 4276 triggered successfully — PDF delivery email sent');
+      if (!resp.ok) {
+        const txt = await resp.text();
+        console.error('Delivery flow trigger failed:', txt);
+        await sendAlert({ ...alertBase, reason: `Le flow de livraison PaygoGPT a refusé la requête (${resp.status}) — le client n'a probablement pas reçu son courriel.`, product: productNames });
+      } else console.log('Delivery flow triggered successfully');
     } catch (err) {
-      console.error('Flow 4276 error:', err.message);
+      console.error('Delivery flow error:', err.message);
+      await sendAlert({ ...alertBase, reason: `Erreur en contactant le flow de livraison PaygoGPT (${err.message}) — le client n'a probablement pas reçu son courriel.`, product: productNames });
     }
   }
 
