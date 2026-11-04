@@ -190,8 +190,10 @@ async function uploadAndGetSignedUrl(pdfBuffer, filename) {
   const key = `watermarked/${filename}-${Date.now()}.pdf`;
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: pdfBuffer, ContentType: 'application/pdf' }));
   const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 172800 });
-  console.log(`Signed URL generated: ${key}`);
-  return url;
+  // Longer link (7 days = S3 maximum) for the internal copy sent to info@
+  const adminUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 604800 });
+  console.log(`Signed URLs generated: ${key}`);
+  return { url, adminUrl };
 }
 
 // ─── RESOLVE PRODUCT ──────────────────────────────────────────────────────────
@@ -221,6 +223,7 @@ async function processLineItem(product, item, formName, stripeName, professional
     : product.amountDisplay;
   console.log(`Processing: ${product.name} × ${quantity}`);
   let downloadUrl = null;
+  let adminUrl = null;
   let pdfAvailable = false;
   const pdfPassword = generatePassword();
   if ((product.includesManuel || product.isSimulation) && professionalOrder) {
@@ -229,16 +232,16 @@ async function processLineItem(product, item, formName, stripeName, professional
       const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
       try {
         const encrypted = await encryptViaRender(Buffer.from(watermarked), pdfPassword);
-        downloadUrl = await uploadAndGetSignedUrl(encrypted, pdfResult.filename);
+        ({ url: downloadUrl, adminUrl } = await uploadAndGetSignedUrl(encrypted, pdfResult.filename));
         pdfAvailable = true;
       } catch (encErr) {
         console.error('Encryption failed, watermark only:', encErr.message);
-        downloadUrl = await uploadAndGetSignedUrl(Buffer.from(watermarked), pdfResult.filename);
+        ({ url: downloadUrl, adminUrl } = await uploadAndGetSignedUrl(Buffer.from(watermarked), pdfResult.filename));
         pdfAvailable = true;
       }
     }
   }
-  return { downloadUrl, pdfPassword, pdfAvailable, amountDisplay, quantity };
+  return { downloadUrl, adminUrl, pdfPassword, pdfAvailable, amountDisplay, quantity };
 }
 
 // ─── UNDELIVERED-ORDER ALERT ──────────────────────────────────────────────────
@@ -392,6 +395,7 @@ export default async function handler(req, res) {
             currency,
             current_date: date,
             download_url: primaryPdf?.downloadUrl || '',
+            download_url_admin: primaryPdf?.adminUrl || '',
             pdf_password: primaryPdf?.pdfPassword || '',
             pdf_available: pdfItems.length > 0 ? 'yes' : 'no',
             includes_classes: classItems.length > 0 ? 'yes' : 'no',
