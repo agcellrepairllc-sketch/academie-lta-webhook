@@ -189,7 +189,8 @@ async function uploadAndGetSignedUrl(pdfBuffer, filename) {
   const BUCKET = process.env.S3_BUCKET || 'academielta';
   const key = `watermarked/${filename}-${Date.now()}.pdf`;
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: pdfBuffer, ContentType: 'application/pdf' }));
-  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 172800 });
+  // Customer link: 7 days (604800 s = S3 maximum for presigned URLs)
+  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 604800 });
   // Longer link (7 days = S3 maximum) for the internal copy sent to info@
   const adminUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn: 604800 });
   console.log(`Signed URLs generated: ${key}`);
