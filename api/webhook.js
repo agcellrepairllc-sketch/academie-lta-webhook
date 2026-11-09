@@ -56,6 +56,37 @@ const WEBSHOP_PRODUCTS = {
   'COURS-CARTE': { name: 'Cours à la carte', label: 'Cours à la carte', amountDisplay: 'CA$60/heure', includesManuel: false, includesClasses: true, classHours: null },
 };
 
+// ─── FLASHCARD ACCESS (packages only) ─────────────────────────────────────────
+// Package buyers (manuel + cours) get the flashcards for their order: we append their
+// email to that order's tab in the allowlist sheet, which the gated PaygoGPT page syncs
+// every 5 minutes. Add one entry per order as its cards page goes live.
+const CARDS_SHEET_ID = '1aFgQjGeLq95ScgHIrv75nrrT0qWVh5Hf-ERrqDfWs4c'; // Allowlist – Cartes (Académie LTA)
+const CARDS_BY_ORDER = {
+  'Ingénieur': { tab: 'Accès', url: 'https://app.paygogpt.com/p/F84sF4AAZ' }, // page 9002
+};
+
+function cardsForOrder(order) {
+  const key = (order || '').trim().toLowerCase();
+  const match = Object.entries(CARDS_BY_ORDER).find(([o]) => o.toLowerCase() === key);
+  return match ? match[1] : null;
+}
+
+async function grantCardsAccess(cards, { email, name, product, date, sessionId }) {
+  const sheets = await getSheetsClient();
+  const range = `'${cards.tab}'!A:F`;
+  const existing = await sheets.spreadsheets.values.get({ spreadsheetId: CARDS_SHEET_ID, range: `'${cards.tab}'!A:A` });
+  const already = (existing.data.values || []).some(r => (r[0] || '').trim().toLowerCase() === email.trim().toLowerCase());
+  if (already) { console.log(`Cards access already granted: ${email}`); return; }
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: CARDS_SHEET_ID,
+    range,
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [[email.trim().toLowerCase(), name || '', product || '', date, `Achat Stripe ${sessionId}`]] },
+  });
+  console.log(`Cards access granted: ${email} → ${cards.tab}`);
+}
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function generatePassword() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -364,16 +395,31 @@ export default async function handler(req, res) {
     const totalQuantity = recognizedItems.reduce((sum, { item }) => sum + (item.quantity || 1), 0);
     const primaryPdf = pdfItems[0];
 
+    // Flashcards: only for forfaits (manuel + cours), only for orders whose cards page exists
+    const isPackageOrder = results.some(r => r.product.includesManuel && r.product.includesClasses);
+    const cards = isPackageOrder ? cardsForOrder(professionalOrder) : null;
+    let cardsGranted = false;
+    if (cards && customerEmail) {
+      try {
+        await grantCardsAccess(cards, { email: customerEmail, name: formName || stripeName, product: productNames, date, sessionId });
+        cardsGranted = true;
+      } catch (err) {
+        console.error('Cards access error:', err.message);
+        await sendAlert({ ...alertBase, reason: `Accès aux cartes-mémoire non ajouté (${err.message}) — ajoutez le courriel manuellement dans le Google Sheet « Allowlist – Cartes ».`, product: productNames });
+      }
+    }
+
     // Determine which flow to fire based on product type
     const FLOW_CLASSES_ONLY = 'https://app.paygogpt.com/api/webhooks/flow/4721/0cc996c684f8d785bd582f79a8fe096dc033d7d4d2a5667ad44baa27db6c0ff6';
     const FLOW_PACKAGE = 'https://app.paygogpt.com/api/webhooks/flow/4722/222aca1740711dad87721e1c201bd87c1fc1ef291e8f48ebfc9c75e8c07d67c9';
+    const FLOW_PACKAGE_CARDS = 'https://app.paygogpt.com/api/webhooks/flow/5cmwy85k/e18b019fd1b2f94b1ded64ff7293e9058b48ecceb6b2434fec25e144e3e6e1cd'; // flow 9230 — forfait + cartes-mémoire
     const FLOW_SIMULATION = 'https://app.paygogpt.com/api/webhooks/flow/6778/719540e640527c6002f1c691f0eaa9030f7738edfa6efa9df562e1d83b0b998c';
     const isSimulationOrder = results.length > 0 && results.every(r => r.product.isSimulation);
     let targetWebhook = PAYGOGPT_PDF_WEBHOOK;
     if (isSimulationOrder) {
       targetWebhook = FLOW_SIMULATION;
     } else if (pdfItems.length > 0 && classItems.length > 0) {
-      targetWebhook = FLOW_PACKAGE;
+      targetWebhook = cardsGranted ? FLOW_PACKAGE_CARDS : FLOW_PACKAGE;
     } else if (pdfItems.length === 0 && classItems.length > 0) {
       targetWebhook = FLOW_CLASSES_ONLY;
     }
@@ -403,6 +449,8 @@ export default async function handler(req, res) {
             class_hours: totalClassHours > 0 ? String(totalClassHours) : '',
             includes_manuel: pdfItems.length > 0 ? 'yes' : 'no',
             quantity: String(totalQuantity),
+            cards_available: cardsGranted ? 'yes' : 'no',
+            cards_url: cardsGranted ? cards.url : '',
           },
         }),
       });
