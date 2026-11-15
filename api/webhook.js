@@ -468,16 +468,9 @@ export default async function handler(req, res) {
     const isTecfeeOrder = results.some(r => r.product.line === 'tecfee');
     const isPackageOrder = results.some(r => r.product.includesManuel && r.product.includesClasses && r.product.line !== 'tecfee');
     const cards = isTecfeeOrder ? TECFEE_CARDS : (isPackageOrder ? cardsForOrder(professionalOrder) : null);
-    let cardsGranted = false;
-    if (cards && customerEmail) {
-      try {
-        await grantCardsAccess(cards, { email: customerEmail, name: formName || stripeName, product: productNames, date, sessionId });
-        cardsGranted = true;
-      } catch (err) {
-        console.error('Cards access error:', err.message);
-        await sendAlert({ ...alertBase, reason: `Accès aux cartes-mémoire non ajouté (${err.message}) — ajoutez le courriel manuellement dans le Google Sheet « Allowlist – Cartes ».`, product: productNames });
-      }
-    }
+    // Allowlist rows are now written by the PaygoGPT delivery flows (9230 / 9737 / 9738) with
+    // PaygoGPT's own Google connection. grantCardsAccess() is kept for reference but no longer called.
+    const cardsGranted = !!(cards && customerEmail);
 
     // Determine which flow to fire based on product type
     const FLOW_CLASSES_ONLY = 'https://app.paygogpt.com/api/webhooks/flow/4721/0cc996c684f8d785bd582f79a8fe096dc033d7d4d2a5667ad44baa27db6c0ff6';
@@ -531,8 +524,7 @@ export default async function handler(req, res) {
             includes_manuel: pdfItems.length > 0 ? 'yes' : 'no',
             quantity: String(totalQuantity),
             cards_available: cardsGranted ? 'yes' : 'no',
-            // TECFÉE always includes the cards, so keep the button live even if the auto-grant failed (alert tells Mélanie to add the email)
-            cards_url: (cardsGranted || isTecfeeOrder) && cards ? cards.url : '',
+            cards_url: cardsGranted ? cards.url : '',
           },
         }),
       });
