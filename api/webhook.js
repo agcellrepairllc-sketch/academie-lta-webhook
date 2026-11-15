@@ -88,7 +88,13 @@ function cardsForOrder(order) {
 async function grantCardsAccess(cards, { email, name, product, date, sessionId }) {
   // Header-aware: tabs may have their columns in any order (Email / Nom / Produit / Ajouté le / Notes).
   const sheets = await getSheetsClient();
-  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: CARDS_SHEET_ID, range: `'${cards.tab}'!A:Z` });
+  // Resolve the real tab title (accents may be stored NFC or NFD, case may differ)
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: CARDS_SHEET_ID, fields: 'sheets.properties.title' });
+  const titles = (meta.data.sheets || []).map(s => s.properties.title);
+  const tab = titles.find(t => t === cards.tab) || titles.find(t => norm(t) === norm(cards.tab));
+  if (!tab) throw new Error(`onglet « ${cards.tab} » introuvable (onglets : ${titles.join(', ')})`);
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: CARDS_SHEET_ID, range: `'${tab}'!A:Z` });
   const rows = resp.data.values || [];
   const headers = (rows[0] || []).map(h => (h || '').trim());
   const col = name => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
@@ -104,7 +110,7 @@ async function grantCardsAccess(cards, { email, name, product, date, sessionId }
   set('Email', target); set('Nom', name || ''); set('Produit', product || ''); set('Ajouté le', date); set('Notes', `Achat Stripe ${sessionId}`);
   await sheets.spreadsheets.values.append({
     spreadsheetId: CARDS_SHEET_ID,
-    range: `'${cards.tab}'!A1`,
+    range: `'${tab}'!A1`,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: [row] },
@@ -525,7 +531,8 @@ export default async function handler(req, res) {
             includes_manuel: pdfItems.length > 0 ? 'yes' : 'no',
             quantity: String(totalQuantity),
             cards_available: cardsGranted ? 'yes' : 'no',
-            cards_url: cardsGranted ? cards.url : '',
+            // TECFÉE always includes the cards, so keep the button live even if the auto-grant failed (alert tells Mélanie to add the email)
+            cards_url: (cardsGranted || isTecfeeOrder) && cards ? cards.url : '',
           },
         }),
       });
