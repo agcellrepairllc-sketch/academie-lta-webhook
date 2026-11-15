@@ -77,7 +77,7 @@ const CARDS_BY_ORDER = {
 
 // TECFÉE flashcards: every TECFÉE product includes them. Set the page URL once the gated page exists;
 // while null, no access is granted and the TECFÉE emails don't show a cards link.
-const TECFEE_CARDS = null; // e.g. { tab: 'TECFÉE', url: 'https://app.paygogpt.com/p/XXXX' }
+const TECFEE_CARDS = { tab: 'TECFÉE', url: 'https://app.paygogpt.com/p/b9UBPWnd' }; // gated page « Cartes interactives TECFÉE »
 
 function cardsForOrder(order) {
   const key = (order || '').trim().toLowerCase();
@@ -86,17 +86,28 @@ function cardsForOrder(order) {
 }
 
 async function grantCardsAccess(cards, { email, name, product, date, sessionId }) {
+  // Header-aware: tabs may have their columns in any order (Email / Nom / Produit / Ajouté le / Notes).
   const sheets = await getSheetsClient();
-  const range = `'${cards.tab}'!A:F`;
-  const existing = await sheets.spreadsheets.values.get({ spreadsheetId: CARDS_SHEET_ID, range: `'${cards.tab}'!A:A` });
-  const already = (existing.data.values || []).some(r => (r[0] || '').trim().toLowerCase() === email.trim().toLowerCase());
-  if (already) { console.log(`Cards access already granted: ${email}`); return; }
+  const resp = await sheets.spreadsheets.values.get({ spreadsheetId: CARDS_SHEET_ID, range: `'${cards.tab}'!A:Z` });
+  const rows = resp.data.values || [];
+  const headers = (rows[0] || []).map(h => (h || '').trim());
+  const col = name => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
+  const emailCol = col('Email');
+  if (emailCol === -1) throw new Error(`colonne « Email » introuvable dans l'onglet ${cards.tab}`);
+  const target = email.trim().toLowerCase();
+  if (rows.slice(1).some(r => (r[emailCol] || '').trim().toLowerCase() === target)) {
+    console.log(`Cards access already granted: ${email}`);
+    return;
+  }
+  const row = new Array(headers.length).fill('');
+  const set = (h, v) => { const i = col(h); if (i !== -1) row[i] = v; };
+  set('Email', target); set('Nom', name || ''); set('Produit', product || ''); set('Ajouté le', date); set('Notes', `Achat Stripe ${sessionId}`);
   await sheets.spreadsheets.values.append({
     spreadsheetId: CARDS_SHEET_ID,
-    range,
+    range: `'${cards.tab}'!A1`,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
-    requestBody: { values: [[email.trim().toLowerCase(), name || '', product || '', date, `Achat Stripe ${sessionId}`]] },
+    requestBody: { values: [row] },
   });
   console.log(`Cards access granted: ${email} → ${cards.tab}`);
 }
