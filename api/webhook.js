@@ -36,6 +36,11 @@ async function getSheetsClient() {
 }
 
 // ─── PRODUCT REGISTRY ─────────────────────────────────────────────────────────
+// TECFÉE manual = one collection split in 2 PDFs (too large for one file). Same password for both.
+const TECFEE_PDFS = [
+  { key: 'tecfee/TECFEE_Partie_1.pdf', filename: 'TECFEE_Partie_1' },
+  { key: 'tecfee/TECFEE_Partie_2.pdf', filename: 'TECFEE_Partie_2' },
+];
 const PRODUCTS = {
   'price_1UPBUoG28GGFb8g33tDT1zB2': { name: "Simulation d'examen OQLF", label: "Simulation d'examen OQLF", amountDisplay: 'CA$49.99', includesManuel: false, includesClasses: false, classHours: 0, isSimulation: true, pdfFolder: 'simulations' },
   'price_1UUemEG28GGFb8g3D5EOHZ9d': { name: 'Manuel Uniquement', label: 'Manuel Uniquement', amountDisplay: 'CA$199', includesManuel: true, includesClasses: false, classHours: 0 },
@@ -44,6 +49,11 @@ const PRODUCTS = {
   'price_1UMyMzG28GGFb8g3DjJGIglJ': { name: 'Forfait Élémentaire A2-B1', label: 'Forfait Élémentaire (A2-B1)', amountDisplay: 'CA$720', includesManuel: true, includesClasses: true, classHours: 15 },
   'price_1UMySeG28GGFb8g3Jwfdus0P': { name: 'Forfait Réussite OQLF B1-B2', label: 'Forfait Réussite OQLF (B1-B2)', amountDisplay: 'CA$520', includesManuel: true, includesClasses: true, classHours: 10 },
   'price_1UMyenG28GGFb8g3K8PqSK1G': { name: 'Forfait VIP', label: 'Forfait VIP ⭐', amountDisplay: 'CA$1,350', includesManuel: true, includesClasses: true, classHours: 30 },
+  // ── TECFÉE line (2026-11-14): one collection in 2 PDFs from s3://academielta/tecfee/, no ordre needed ──
+  'price_1UbtAkG28GGFb8g3E9u3MVMn': { name: 'Collection Réussite TECFÉE', label: 'Collection Réussite TECFÉE', amountDisplay: 'CA$179.99', includesManuel: true, includesClasses: false, classHours: 0, line: 'tecfee', pdfKeys: TECFEE_PDFS },
+  'price_1UbtAnG28GGFb8g3TiBHoeaK': { name: 'Forfait Essentiel TECFÉE', label: 'Forfait Essentiel TECFÉE', amountDisplay: 'CA$599', includesManuel: true, includesClasses: true, classHours: 10, line: 'tecfee', pdfKeys: TECFEE_PDFS },
+  'price_1UbtApG28GGFb8g39U7hadRc': { name: 'Forfait Réussite TECFÉE', label: 'Forfait Réussite TECFÉE', amountDisplay: 'CA$849', includesManuel: true, includesClasses: true, classHours: 15, line: 'tecfee', pdfKeys: TECFEE_PDFS },
+  'price_1UbtAsG28GGFb8g3ETeMP10m': { name: 'Forfait Excellence TECFÉE', label: 'Forfait Excellence TECFÉE', amountDisplay: 'CA$1,299', includesManuel: true, includesClasses: true, classHours: 25, line: 'tecfee', pdfKeys: TECFEE_PDFS },
   'price_1TiOnQG28GGFb8g3jGa0B7cO': { name: 'Cours à la carte', label: 'Cours à la carte', amountDisplay: 'CA$60/heure', includesManuel: false, includesClasses: true, classHours: null },
 };
 
@@ -64,6 +74,10 @@ const CARDS_SHEET_ID = '1aFgQjGeLq95ScgHIrv75nrrT0qWVh5Hf-ERrqDfWs4c'; // Allowl
 const CARDS_BY_ORDER = {
   'Ingénieur': { tab: 'Accès', url: 'https://app.paygogpt.com/p/F84sF4AAZ' }, // page 9002
 };
+
+// TECFÉE flashcards: every TECFÉE product includes them. Set the page URL once the gated page exists;
+// while null, no access is granted and the TECFÉE emails don't show a cards link.
+const TECFEE_CARDS = null; // e.g. { tab: 'TECFÉE', url: 'https://app.paygogpt.com/p/XXXX' }
 
 function cardsForOrder(order) {
   const key = (order || '').trim().toLowerCase();
@@ -184,6 +198,20 @@ async function downloadPDF(order, folder = 'manuals') {
   }
 }
 
+async function downloadPDFByKey(key, filename) {
+  const BUCKET = process.env.S3_BUCKET || 'academielta';
+  try {
+    const resp = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    const chunks = [];
+    for await (const c of resp.Body) chunks.push(c);
+    console.log(`PDF downloaded: ${key}`);
+    return { buffer: Buffer.concat(chunks), filename };
+  } catch (err) {
+    console.error(`PDF not found: ${key}`, err.message);
+    return null;
+  }
+}
+
 async function watermarkPDF(pdfBuffer, formName, stripeName, date) {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -258,6 +286,28 @@ async function processLineItem(product, item, formName, stripeName, professional
   let adminUrl = null;
   let pdfAvailable = false;
   const pdfPassword = generatePassword();
+  if (product.pdfKeys) {
+    // Fixed set of PDFs (TECFÉE): processed in parallel to stay well under the 60 s function limit
+    const pdfs = await Promise.all(product.pdfKeys.map(async ({ key, filename }) => {
+      const pdfResult = await downloadPDFByKey(key, filename);
+      if (!pdfResult) return null;
+      const watermarked = await watermarkPDF(pdfResult.buffer, formName, stripeName, date);
+      let body;
+      try {
+        body = await encryptViaRender(Buffer.from(watermarked), pdfPassword);
+      } catch (encErr) {
+        console.error(`Encryption failed for ${key}, watermark only:`, encErr.message);
+        body = Buffer.from(watermarked);
+      }
+      const { url, adminUrl: aUrl } = await uploadAndGetSignedUrl(body, pdfResult.filename);
+      return { downloadUrl: url, adminUrl: aUrl };
+    }));
+    const ok = pdfs.every(Boolean);
+    return {
+      downloadUrl: pdfs[0]?.downloadUrl || null, adminUrl: pdfs[0]?.adminUrl || null,
+      extraPdfs: pdfs.slice(1), pdfPassword, pdfAvailable: ok, amountDisplay, quantity,
+    };
+  }
   if ((product.includesManuel || product.isSimulation) && professionalOrder) {
     const pdfResult = await downloadPDF(professionalOrder, product.pdfFolder || 'manuals');
     if (pdfResult) {
@@ -376,7 +426,9 @@ export default async function handler(req, res) {
     // Alert for any item that should have included a PDF but didn't
     for (const r of results) {
       if ((r.product.includesManuel || r.product.isSimulation) && !r.pdfAvailable) {
-        const reason = !professionalOrder
+        const reason = r.product.pdfKeys
+          ? `Un ou plusieurs PDF TECFÉE introuvables ou en erreur dans S3 (${r.product.pdfKeys.map(p => p.key).join(', ')}) — la livraison n'a pas été envoyée.`
+          : !professionalOrder
           ? "Ordre professionnel introuvable dans le Google Sheet des commandes — le PDF n'a pas été envoyé."
           : `PDF introuvable dans S3 pour l'ordre « ${professionalOrder} » — le PDF n'a pas été envoyé.`;
         await sendAlert({ ...alertBase, reason, product: r.product.label });
@@ -396,8 +448,9 @@ export default async function handler(req, res) {
     const primaryPdf = pdfItems[0];
 
     // Flashcards: only for forfaits (manuel + cours), only for orders whose cards page exists
-    const isPackageOrder = results.some(r => r.product.includesManuel && r.product.includesClasses);
-    const cards = isPackageOrder ? cardsForOrder(professionalOrder) : null;
+    const isTecfeeOrder = results.some(r => r.product.line === 'tecfee');
+    const isPackageOrder = results.some(r => r.product.includesManuel && r.product.includesClasses && r.product.line !== 'tecfee');
+    const cards = isTecfeeOrder ? TECFEE_CARDS : (isPackageOrder ? cardsForOrder(professionalOrder) : null);
     let cardsGranted = false;
     if (cards && customerEmail) {
       try {
@@ -414,9 +467,18 @@ export default async function handler(req, res) {
     const FLOW_PACKAGE = 'https://app.paygogpt.com/api/webhooks/flow/4722/222aca1740711dad87721e1c201bd87c1fc1ef291e8f48ebfc9c75e8c07d67c9';
     const FLOW_PACKAGE_CARDS = 'https://app.paygogpt.com/api/webhooks/flow/5cmwy85k/e18b019fd1b2f94b1ded64ff7293e9058b48ecceb6b2434fec25e144e3e6e1cd'; // flow 9230 — forfait + cartes-mémoire
     const FLOW_SIMULATION = 'https://app.paygogpt.com/api/webhooks/flow/6778/719540e640527c6002f1c691f0eaa9030f7738edfa6efa9df562e1d83b0b998c';
+    const FLOW_TECFEE_COLLECTION = '__FLOW_TECFEE_COLLECTION__'; // TECFÉE material only
+    const FLOW_TECFEE_FORFAIT = '__FLOW_TECFEE_FORFAIT__'; // TECFÉE forfaits (material + classes)
     const isSimulationOrder = results.length > 0 && results.every(r => r.product.isSimulation);
     let targetWebhook = PAYGOGPT_PDF_WEBHOOK;
-    if (isSimulationOrder) {
+    if (isTecfeeOrder) {
+      // TECFÉE emails are separate from OQLF (different audience, 2 PDFs). Classes → forfait flow.
+      if (pdfItems.length === 0) {
+        console.error('TECFÉE order without PDFs — alert already sent, no delivery email.');
+        return res.status(200).json({ received: true, delivered: false });
+      }
+      targetWebhook = classItems.length > 0 ? FLOW_TECFEE_FORFAIT : FLOW_TECFEE_COLLECTION;
+    } else if (isSimulationOrder) {
       targetWebhook = FLOW_SIMULATION;
     } else if (pdfItems.length > 0 && classItems.length > 0) {
       targetWebhook = cardsGranted ? FLOW_PACKAGE_CARDS : FLOW_PACKAGE;
@@ -435,7 +497,7 @@ export default async function handler(req, res) {
           widgetId: 97667780,
           data: {
             product_name: productNames,
-            professional_order: professionalOrder,
+            professional_order: isTecfeeOrder ? 'TECFÉE' : professionalOrder,
             stripe_name: stripeName,
             amount_display: `CA$${(sessionTotal / 100).toFixed(2)}`,
             stripe_session_id: sessionId,
@@ -443,6 +505,8 @@ export default async function handler(req, res) {
             current_date: date,
             download_url: primaryPdf?.downloadUrl || '',
             download_url_admin: primaryPdf?.adminUrl || '',
+            download_url_2: primaryPdf?.extraPdfs?.[0]?.downloadUrl || '',
+            download_url_admin_2: primaryPdf?.extraPdfs?.[0]?.adminUrl || '',
             pdf_password: primaryPdf?.pdfPassword || '',
             pdf_available: pdfItems.length > 0 ? 'yes' : 'no',
             includes_classes: classItems.length > 0 ? 'yes' : 'no',
