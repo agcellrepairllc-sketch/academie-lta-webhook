@@ -72,12 +72,12 @@ const WEBSHOP_PRODUCTS = {
 // every 5 minutes. Add one entry per order as its cards page goes live.
 const CARDS_SHEET_ID = '1aFgQjGeLq95ScgHIrv75nrrT0qWVh5Hf-ERrqDfWs4c'; // Allowlist – Cartes (Académie LTA)
 const CARDS_BY_ORDER = {
-  'Ingénieur': { tab: 'Accès', url: 'https://app.paygogpt.com/p/F84sF4AAZ' }, // page 9002
+  'Ingénieur': { tab: 'Accès', url: 'https://app.paygogpt.com/p/F84sF4AAZ', allowlistFlow: 'https://app.paygogpt.com/api/webhooks/flow/9776/31d6662806f812a4b689205bbfdb38f70dcad88998b0a3be387fad1fe1430cc3' }, // page 9002, flow 9776
 };
 
 // TECFÉE flashcards: every TECFÉE product includes them. Set the page URL once the gated page exists;
 // while null, no access is granted and the TECFÉE emails don't show a cards link.
-const TECFEE_CARDS = { tab: 'TECFÉE', url: 'https://app.paygogpt.com/p/b9UBPWnd' }; // gated page « Cartes interactives TECFÉE »
+const TECFEE_CARDS = { tab: 'TECFÉE', url: 'https://app.paygogpt.com/p/b9UBPWnd', allowlistFlow: 'https://app.paygogpt.com/api/webhooks/flow/9775/4e383de95535a34209452905b3e5c7af660e45ac3b95734f2dba4606c8fda335' }; // flow 9775 // gated page « Cartes interactives TECFÉE »
 
 function cardsForOrder(order) {
   const key = (order || '').trim().toLowerCase();
@@ -468,9 +468,27 @@ export default async function handler(req, res) {
     const isTecfeeOrder = results.some(r => r.product.line === 'tecfee');
     const isPackageOrder = results.some(r => r.product.includesManuel && r.product.includesClasses && r.product.line !== 'tecfee');
     const cards = isTecfeeOrder ? TECFEE_CARDS : (isPackageOrder ? cardsForOrder(professionalOrder) : null);
-    // Allowlist rows are now written by the PaygoGPT delivery flows (9230 / 9737 / 9738) with
+    // Allowlist rows are written by small dedicated PaygoGPT flows (9775 TECFÉE / 9776 Accès) using
     // PaygoGPT's own Google connection. grantCardsAccess() is kept for reference but no longer called.
     const cardsGranted = !!(cards && customerEmail);
+    if (cardsGranted && cards.allowlistFlow) {
+      try {
+        const r = await fetch(cards.allowlistFlow, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contactEmail: customerEmail,
+            contactName: formName || stripeName,
+            widgetId: 97667780,
+            data: { product_name: productNames, professional_order: isTecfeeOrder ? 'TECFÉE' : professionalOrder, current_date: date, stripe_session_id: sessionId },
+          }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      } catch (err) {
+        console.error('Cards allowlist flow error:', err.message);
+        await sendAlert({ ...alertBase, reason: `Accès aux cartes-mémoire non ajouté (${err.message}) — ajoutez le courriel manuellement dans l'onglet « ${cards.tab} » du Google Sheet des cartes.`, product: productNames });
+      }
+    }
 
     // Determine which flow to fire based on product type
     const FLOW_CLASSES_ONLY = 'https://app.paygogpt.com/api/webhooks/flow/4721/0cc996c684f8d785bd582f79a8fe096dc033d7d4d2a5667ad44baa27db6c0ff6';
