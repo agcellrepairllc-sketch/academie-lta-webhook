@@ -467,8 +467,8 @@ export default async function handler(req, res) {
     const FLOW_PACKAGE = 'https://app.paygogpt.com/api/webhooks/flow/4722/222aca1740711dad87721e1c201bd87c1fc1ef291e8f48ebfc9c75e8c07d67c9';
     const FLOW_PACKAGE_CARDS = 'https://app.paygogpt.com/api/webhooks/flow/5cmwy85k/e18b019fd1b2f94b1ded64ff7293e9058b48ecceb6b2434fec25e144e3e6e1cd'; // flow 9230 — forfait + cartes-mémoire
     const FLOW_SIMULATION = 'https://app.paygogpt.com/api/webhooks/flow/6778/719540e640527c6002f1c691f0eaa9030f7738edfa6efa9df562e1d83b0b998c';
-    const FLOW_TECFEE_COLLECTION = '__FLOW_TECFEE_COLLECTION__'; // TECFÉE material only
-    const FLOW_TECFEE_FORFAIT = '__FLOW_TECFEE_FORFAIT__'; // TECFÉE forfaits (material + classes)
+    const FLOW_TECFEE_COLLECTION = 'https://app.paygogpt.com/api/webhooks/flow/lvlted1m/93cc6daa293896d95ab89f8c6c346f81a2dbc248bd1d1aca998db48991bef5fd'; // flow 9737 — TECFÉE material only
+    const FLOW_TECFEE_FORFAIT = 'https://app.paygogpt.com/api/webhooks/flow/uc10nzz3/dab8a49890777c0cba4e8cbfc2caa9fca2f40700aca0e673313c459245dbe899'; // flow 9738 — TECFÉE forfaits (material + classes)
     const isSimulationOrder = results.length > 0 && results.every(r => r.product.isSimulation);
     let targetWebhook = PAYGOGPT_PDF_WEBHOOK;
     if (isTecfeeOrder) {
