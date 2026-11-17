@@ -52,7 +52,7 @@ const PRODUCTS = {
   // ── TECFÉE line (2026-11-14): one collection in 2 PDFs from s3://academielta/tecfee/, no ordre needed ──
   'price_1UbtAkG28GGFb8g3E9u3MVMn': { name: 'Collection Réussite TECFÉE', label: 'Collection Réussite TECFÉE', amountDisplay: 'CA$179.99', includesManuel: true, includesClasses: false, classHours: 0, line: 'tecfee', pdfKeys: TECFEE_PDFS },
   'price_1UbtAnG28GGFb8g3TiBHoeaK': { name: 'Forfait Essentiel TECFÉE', label: 'Forfait Essentiel TECFÉE', amountDisplay: 'CA$599', includesManuel: true, includesClasses: true, classHours: 10, line: 'tecfee', pdfKeys: TECFEE_PDFS },
-  'price_1UbtApG28GGFb8g39U7hadRc': { name: 'Forfait Réussite TECFÉE', label: 'Forfait Réussite TECFÉE', amountDisplay: 'CA$849', includesManuel: true, includesClasses: true, classHours: 15, line: 'tecfee', pdfKeys: TECFEE_PDFS },
+  'price_1UbtApG28GGFb8g39U7hadRc': { name: 'Forfait Performance TECFÉE', label: 'Forfait Performance TECFÉE', amountDisplay: 'CA$849', includesManuel: true, includesClasses: true, classHours: 15, line: 'tecfee', pdfKeys: TECFEE_PDFS },
   'price_1UbtAsG28GGFb8g3ETeMP10m': { name: 'Forfait Excellence TECFÉE', label: 'Forfait Excellence TECFÉE', amountDisplay: 'CA$1,299', includesManuel: true, includesClasses: true, classHours: 25, line: 'tecfee', pdfKeys: TECFEE_PDFS },
   'price_1TiOnQG28GGFb8g3jGa0B7cO': { name: 'Cours à la carte', label: 'Cours à la carte', amountDisplay: 'CA$60/heure', includesManuel: false, includesClasses: true, classHours: null },
 };
