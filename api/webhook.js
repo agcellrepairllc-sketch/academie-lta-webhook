@@ -192,7 +192,33 @@ async function lookupFromSheet(email, stripeName) {
 }
 
 // ─── DEDUPLICATION ────────────────────────────────────────────────────────────
+// In-memory Set only works inside one warm instance. Stripe can deliver the same event twice to
+// different instances (seen 2026-11-15/16: two full deliveries ~33 s apart), so we also claim each
+// session in a "Processed" tab of the Orders sheet before doing any work.
 const processedSessions = new Set();
+const PROCESSED_TAB = 'Processed';
+
+async function claimSession(sessionId) {
+  try {
+    const sheets = await getSheetsClient();
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: 'sheets.properties.title' });
+    const titles = (meta.data.sheets || []).map(s => s.properties.title);
+    if (!titles.includes(PROCESSED_TAB)) {
+      await sheets.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: [{ addSheet: { properties: { title: PROCESSED_TAB } } }] } });
+      await sheets.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: `${PROCESSED_TAB}!A1:B1`, valueInputOption: 'RAW', requestBody: { values: [['Session', 'Claimed at (UTC)']] } });
+    }
+    const col = await sheets.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${PROCESSED_TAB}!A:A` });
+    if ((col.data.values || []).some(r => r[0] === sessionId)) return false;
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID, range: `${PROCESSED_TAB}!A1`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [[sessionId, new Date().toISOString()]] },
+    });
+    return true;
+  } catch (err) {
+    console.error('claimSession error (processing anyway):', err.message);
+    return true; // fail open: never block a delivery because the sheet is unreachable
+  }
+}
 
 // ─── PDF DELIVERY ─────────────────────────────────────────────────────────────
 async function downloadPDF(order, folder = 'manuals') {
@@ -399,6 +425,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ received: true, skipped: true });
     }
     processedSessions.add(sessionId);
+    if (!(await claimSession(sessionId))) {
+      console.log('Session already claimed by another delivery, skipping.');
+      return res.status(200).json({ received: true, skipped: true });
+    }
 
     // Look up ordre from private Google Sheet
     const { formName, order: professionalOrder } = await lookupFromSheet(customerEmail, stripeName);
